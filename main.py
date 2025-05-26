@@ -79,33 +79,55 @@ class TaskManagerPlugin(BasePlugin):
             return None
 
     @handler(GroupMessageReceived)
-    @handler(PersonMessageReceived)
-    async def message_handler(self, ctx: EventContext):  # ✅ 确保是异步方法
-        msg = str(ctx.event.message_chain).strip()
-        parts = msg.split(maxsplit=2)
-        
-        is_processed = False
-        
-        if msg.startswith("/剩余时间"):
-            await self.run_remaining_time(ctx)
-            is_processed = True
-        elif msg.startswith("/添加") and len(parts) == 3:
-            await self.add_task(ctx, parts[1], parts[2])
-            is_processed = True
-        elif msg.startswith("/删除") and len(parts) == 2:
-            await self.delete_task(ctx, parts[1])
-            is_processed = True
-        elif msg == "/任务列表":
-            await self.list_tasks(ctx)
-            is_processed = True
+@handler(PersonMessageReceived)
+async def message_handler(self, ctx: EventContext):
+    """消息处理"""
+    msg = str(ctx.event.message_chain).strip()
+    parts = msg.split(maxsplit=2)
+    
+    is_processed = False
+    
+    try:
+        # 统一命令处理逻辑
+        if msg.startswith(("/剩余时间", "/添加", "/删除", "/任务列表")):
+            if msg.startswith("/剩余时间"):
+                await self.run_remaining_time(ctx)
+                is_processed = True
+                
+            elif msg.startswith("/添加") and len(parts) == 3:
+                await self.add_task(ctx, parts[1], parts[2])
+                is_processed = True
+                
+            elif msg.startswith("/删除") and len(parts) == 2:
+                await self.delete_task(ctx, parts[1])
+                is_processed = True
+                
+            elif msg == "/任务列表":
+                await self.list_tasks(ctx)
+                is_processed = True
 
+            # 日志记录修复
+            if is_processed:
+                log_msg = (
+                    f"处理命令: {msg[:20]}... "
+                    f"[用户: {ctx.event.sender_id}] "
+                    f"[会话: {ctx.event.launcher_id}]"
+                )
+                self.ap.logger.debug(log_msg)
+                
+        # 彻底阻止处理
         if is_processed:
             ctx.prevent_default()
+            ctx.event.message_chain.clear()  # 清空消息链
+            return  # 提前返回
+            
+        # 非命令消息交给其他处理器
+        return  
         
-        # 调试日志（可选）
-        self.ap.logger.info(f"Handled command: {msg}", 
-                          sender=ctx.event.sender_id,
-                          launcher=ctx.event.launcher_id)
+    except Exception as e:
+        self.ap.logger.error(f"处理命令失败: {str(e)}")
+        await ctx.reply(MessageChain([Plain("命令处理出错，请联系管理员")]))
+        ctx.prevent_default()
 
     async def run_remaining_time(self, ctx: EventContext):
         """执行剩余时间脚本"""
