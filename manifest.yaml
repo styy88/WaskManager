@@ -4,7 +4,7 @@ kind: Plugin
 metadata:
   author: xiaoxin
   name: TaskManager
-  repository: 'https://github.com/yourname/TaskManagerPlugin'
+  repository: 'https://github.com/styy88/TaskManager'
   version: 1.0.0
   description:
     en_US: Task scheduler plugin for LangBot
