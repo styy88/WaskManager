@@ -101,7 +101,6 @@ class TaskManagerPlugin(BasePlugin):
 
         if is_processed:
             ctx.prevent_default()
-            ctx.prevent_postprocess()
         
         # 调试日志（可选）
         self.ap.logger.info(f"Handled command: {msg}", 
