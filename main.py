@@ -80,9 +80,9 @@ class TaskManagerPlugin(BasePlugin):
     @handler(GroupMessageReceived)
     @handler(PersonMessageReceived)
     async def message_handler(self, ctx: EventContext):
-    """消息处理"""
-    msg = str(ctx.event.message_chain).strip()
-    parts = msg.split(maxsplit=2)
+        """消息处理"""
+        msg = str(ctx.event.message_chain).strip()
+        parts = msg.split(maxsplit=2)
     
     is_processed = False  # 命令处理标志
     
