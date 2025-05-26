@@ -9,7 +9,6 @@ import asyncio
 import subprocess
 from datetime import datetime, timedelta, timezone
 
-# 创建UTC+8时区
 china_tz = timezone(timedelta(hours=8))
 
 @register(name="TaskManager", description="定时任务管理插件", version="1.0", author="xiaoxin")
@@ -20,9 +19,11 @@ class TaskManagerPlugin(BasePlugin):
         self.data_dir = os.path.join(os.path.dirname(__file__), "data")
         self.tasks_file = os.path.join(os.path.dirname(__file__), "tasks.json")
         os.makedirs(self.data_dir, exist_ok=True)
+    
+    async def initialize(self):  # ✅ 异步初始化
         self.load_tasks()
         self.check_task = asyncio.create_task(self.schedule_checker())
-
+        
     def load_tasks(self):
         """加载定时任务"""
         if os.path.exists(self.tasks_file):
@@ -79,37 +80,28 @@ class TaskManagerPlugin(BasePlugin):
 
     @handler(GroupMessageReceived)
     @handler(PersonMessageReceived)
-    async def message_handler(self, ctx: EventContext):
-        """消息处理"""
+    async def message_handler(self, ctx: EventContext):  # ✅ 确保是异步方法
         msg = str(ctx.event.message_chain).strip()
         parts = msg.split(maxsplit=2)
-    
-    is_processed = False  # 命令处理标志
-    
-    # 命令路由
-    if msg.startswith("/剩余时间"):
-        await self.run_remaining_time(ctx)
-        is_processed = True
         
-    elif msg.startswith("/添加") and len(parts) == 3:
-        script_name, schedule_time = parts[1], parts[2]
-        await self.add_task(ctx, script_name, schedule_time)
-        is_processed = True
+        is_processed = False
         
-    elif msg.startswith("/删除") and len(parts) == 2:
-        script_name = parts[1]
-        await self.delete_task(ctx, script_name)
-        is_processed = True
-        
-    elif msg == "/任务列表":
-        await self.list_tasks(ctx)
-        is_processed = True
+        if msg.startswith("/剩余时间"):
+            await self.run_remaining_time(ctx)
+            is_processed = True
+        elif msg.startswith("/添加") and len(parts) == 3:
+            await self.add_task(ctx, parts[1], parts[2])
+            is_processed = True
+        elif msg.startswith("/删除") and len(parts) == 2:
+            await self.delete_task(ctx, parts[1])
+            is_processed = True
+        elif msg == "/任务列表":
+            await self.list_tasks(ctx)
+            is_processed = True
 
-    # 拦截处理
-    if is_processed:
-        # 阻止默认回复和后续处理
-        ctx.prevent_default()
-        ctx.prevent_postprocess()
+        if is_processed:
+            ctx.prevent_default()
+            ctx.prevent_postprocess()
         
         # 调试日志（可选）
         self.ap.logger.info(f"Handled command: {msg}", 
