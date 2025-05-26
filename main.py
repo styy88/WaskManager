@@ -78,20 +78,43 @@ class TaskManagerPlugin(BasePlugin):
             return None
 
     @handler(GroupMessageReceived)
-    @handler(PersonMessageReceived)
-    async def message_handler(self, ctx: EventContext):
-        """消息处理"""
-        msg = str(ctx.event.message_chain).strip()
-        parts = msg.split(maxsplit=2)
+@handler(PersonMessageReceived)
+async def message_handler(self, ctx: EventContext):
+    """消息处理"""
+    msg = str(ctx.event.message_chain).strip()
+    parts = msg.split(maxsplit=2)
+    
+    is_processed = False  # 命令处理标志
+    
+    # 命令路由
+    if msg.startswith("/剩余时间"):
+        await self.run_remaining_time(ctx)
+        is_processed = True
+        
+    elif msg.startswith("/添加") and len(parts) == 3:
+        script_name, schedule_time = parts[1], parts[2]
+        await self.add_task(ctx, script_name, schedule_time)
+        is_processed = True
+        
+    elif msg.startswith("/删除") and len(parts) == 2:
+        script_name = parts[1]
+        await self.delete_task(ctx, script_name)
+        is_processed = True
+        
+    elif msg == "/任务列表":
+        await self.list_tasks(ctx)
+        is_processed = True
 
-        if msg.startswith("/剩余时间"):
-            await self.run_remaining_time(ctx)
-        elif msg.startswith("/添加") and len(parts) == 3:
-            await self.add_task(ctx, parts[1], parts[2])
-        elif msg.startswith("/删除") and len(parts) == 2:
-            await self.delete_task(ctx, parts[1])
-        elif msg == "/任务列表":
-            await self.list_tasks(ctx)
+    # 拦截处理
+    if is_processed:
+        # 阻止默认回复和后续处理
+        ctx.prevent_default()
+        ctx.prevent_postprocess()
+        
+        # 调试日志（可选）
+        self.ap.logger.info(f"Handled command: {msg}", 
+                          sender=ctx.event.sender_id,
+                          launcher=ctx.event.launcher_id)
 
     async def run_remaining_time(self, ctx: EventContext):
         """执行剩余时间脚本"""
