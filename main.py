@@ -15,7 +15,7 @@ china_tz = timezone(timedelta(hours=8))
 @register(name="TaskManager", 
           description="定时任务管理插件（支持即时执行和定时任务）", 
           version="1.0", 
-          author="YourName")
+          author="xiaoxin")
 class TaskManagerPlugin(BasePlugin):
     def __init__(self, host: APIHost):
         super().__init__(host)
