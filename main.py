@@ -1,9 +1,7 @@
-# -*- coding: utf-8 -*-
 from pkg.plugin.context import register, handler, BasePlugin, APIHost, EventContext
-from pkg.plugin.events import GroupMessageReceived, PersonMessageReceived
-import subprocess
+from pkg.plugin.events import GroupMessageReceived
 import os
-import re
+import json
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
@@ -16,24 +14,31 @@ china_tz = timezone(timedelta(hours=8))
           description="定时任务管理插件（支持即时执行和定时任务）", 
           version="1.0", 
           author="xiaoxin")
-class TaskManagerPlugin(BasePlugin):
+class AutoTaskPlugin(BasePlugin):
     def __init__(self, host: APIHost):
         super().__init__(host)
         self.host = host
         self.tasks = []
-        self.lock = asyncio.Lock()
-        self.data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        os.makedirs(self.data_dir, exist_ok=True)
+        self.lock = asyncio.Lock()  # 同步锁初始化
         
-        # 加载已有任务
-        self.load_tasks()
-        # 启动定时检查
+        # 加载任务
+        self.load_tasks()  # ✅ 现在能正确调用
+        
+        # 启动定时器
         self.check_timer_task = asyncio.create_task(self.timer_loop())
-
-    async def timer_loop(self):
-        """定时任务检查循环"""
-        while True:
-            await asyncio.sleep(30)  # 每30秒检查一次
+    
+    def load_tasks(self):  # ✅ 正确定义在类内
+        """加载任务列表"""
+        try:
+            with open('tasks.json', 'r') as f:
+                self.tasks = json.load(f)
+        except FileNotFoundError:
+            self.tasks = []
+    
+    async def timer_loop(self):  # ✅ 异步方法
+        async with self.lock:  # ✅ 正确使用异步锁
+            while True:
+                await asyncio.sleep(1)
             async with self.lock:
                 now = datetime.now(china_tz)
                 current_time = now.strftime("%H:%M")
