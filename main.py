@@ -170,40 +170,56 @@ class WaskManagerPlugin(BasePlugin):
         await ctx.reply(MessageChain([Plain(f"✅ 执行成功\n{output[:1500]}")]))
 
     async def _add_task(self, ctx: EventContext, name: str, time_str: str):
-        """添加新任务"""
-        if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
-            raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
+    """修正后的添加任务方法"""
+    # 参数校验增强
+    if not name or not time_str:
+        raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
 
-        script_path = os.path.join(self.data_dir, f"{name}.py")
-        if not os.path.exists(script_path):
-            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.data_dir))
-            raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
+    # 时间格式校验
+    if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
+        raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
-        new_task = {
-            "script_name": name,
-            "time": time_str,
-            "target_type": ctx.event.launcher_type.value,
-            "target_id": str(ctx.event.launcher_id),
-            "last_run": None,
-            "created": datetime.now(china_tz).isoformat()
-        }
-        new_task["task_id"] = generate_task_id(new_task)
+    # 获取正确的会话类型（兼容不同框架版本）
+    try:
+        # 尝试获取枚举值
+        launcher_type = ctx.event.launcher_type.value
+    except AttributeError:
+        # 直接使用字符串值
+        launcher_type = str(ctx.event.launcher_type)
+
+    # 脚本存在性检查
+    script_path = os.path.join(self.data_dir, f"{name}.py")
+    if not os.path.exists(script_path):
+        available = ", ".join(f.replace('.py', '') for f in os.listdir(self.data_dir))
+        raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
+
+    # 构造任务对象
+    new_task = {
+        "script_name": name,
+        "time": time_str,
+        "target_type": launcher_type,  # 使用修正后的类型值
+        "target_id": str(ctx.event.launcher_id),
+        "last_run": None,
+        "created": datetime.now(china_tz).isoformat()
+    }
+    new_task["task_id"] = generate_task_id(new_task)
+    
+    # 冲突检测
+    if any(t["task_id"] == new_task["task_id"] for t in self.tasks):
+        raise ValueError(f"该时段任务已存在（ID: {new_task['task_id']}）")
         
-        # 冲突检测
-        if any(t["task_id"] == new_task["task_id"] for t in self.tasks):
-            raise ValueError(f"该时段任务已存在（ID: {new_task['task_id']}）")
-            
-        self.tasks.append(new_task)
-        self._save_tasks()
-        
-        reply_msg = (
-            "✅ 定时任务创建成功\n"
-            f"名称：{name}\n"
-            f"时间：每日 {time_str}\n"
-            f"绑定到：{ctx.event.launcher_type.name}\n"
-            f"任务ID：{new_task['task_id']}"
-        )
-        await ctx.reply(MessageChain([Plain(reply_msg)]))
+    self.tasks.append(new_task)
+    self._save_tasks()
+    
+    # 成功提示
+    reply_msg = (
+        "✅ 定时任务创建成功\n"
+        f"名称：{name}\n"
+        f"时间：每日 {time_str}\n"
+        f"绑定会话：{launcher_type}\n"
+        f"任务ID：{new_task['task_id']}"
+    )
+    await ctx.reply(MessageChain([Plain(reply_msg)]))
 
     async def _delete_task(self, ctx: EventContext, identifier: str):
         """删除当前会话的任务"""
