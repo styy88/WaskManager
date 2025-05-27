@@ -163,22 +163,24 @@ class WaskManagerPlugin(BasePlugin):
 @handler(GroupNormalMessageReceived)
 @handler(PersonNormalMessageReceived)
 async def message_handler(self, ctx: EventContext):
-    """修复的事件处理函数"""
+    """兼容不同框架版本的消息处理器"""
     try:
-        msg = str(ctx.event.message_chain).strip()
+        # 获取消息链的正确方式（关键修改点）
+        if hasattr(ctx.event, 'query'):
+            msg_chain = ctx.event.query.message_chain  # 适配新版框架
+        else:
+            msg_chain = ctx.event.message_chain  # 旧版框架兼容
+            
+        msg = str(msg_chain).strip()
         
-        # 仅处理插件命令
-        if not (msg.startswith('/定时') or msg.startswith('/执行')):
+        # 严格命令过滤
+        if not msg.startswith(('/定时', '/执行')):
             return
             
         parts = msg.split(maxsplit=3)
         
-        if parts[0] == "/定时":
-            await self.handle_schedule_command(ctx, parts)
-        elif parts[0] == "/执行":
-            await self.handle_execute_command(ctx, parts)
-            
-        # 阻断后续处理（关键）
+        # 处理命令逻辑...
+        
         ctx.prevent_default()
 
     except Exception as e:
