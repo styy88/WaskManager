@@ -26,7 +26,7 @@ class ZaskManagerPlugin(BasePlugin):
         os.makedirs(self.data_dir, exist_ok=True)
     
     async def initialize(self):
-        """修复初始化方法"""
+        """初始化方法"""
         self._load_tasks()
         await self.restart_scheduler()
         self.ap.logger.info("插件初始化完成")
@@ -43,7 +43,6 @@ class ZaskManagerPlugin(BasePlugin):
             if os.path.exists(self.tasks_file):
                 with open(self.tasks_file, "r", encoding="utf-8") as f:
                     raw_tasks = json.load(f)
-                    # 兼容旧数据格式
                     self.tasks = [
                         {**task, "task_id": task.get("task_id") or generate_task_id(task)}
                         for task in raw_tasks
@@ -56,7 +55,7 @@ class ZaskManagerPlugin(BasePlugin):
     def _save_tasks(self):
         """安全保存任务数据"""
         with open(self.tasks_file, "w", encoding="utf-8") as f:
-            json.dump(self.tasks, f, indent=2, ensure_ascii=False)
+            json.dump(self.tasks, f, indent=2, ensure_asciii=False)
 
     async def schedule_checker(self):
         """定时任务检查器"""
@@ -123,7 +122,6 @@ class ZaskManagerPlugin(BasePlugin):
     async def message_handler(self, ctx: EventContext):
         """消息处理器"""
         try:
-            # 兼容不同框架版本的消息链获取
             query = getattr(ctx.event, 'query', ctx.event)
             msg = str(query.message_chain).strip()
             
@@ -169,31 +167,26 @@ class ZaskManagerPlugin(BasePlugin):
         output = await self._execute_script(parts[1])
         await ctx.reply(MessageChain([Plain(f"✅ 执行成功\n{output[:1500]}")]))
 
-async def _add_task(self, ctx: EventContext, name: str, time_str: str):
-    """修复类型兼容性的添加任务方法"""
-    # 参数校验增强
-    if not name or not time_str:
-        raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
-    
-    # 时间格式校验
-    if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
-        raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
+    async def _add_task(self, ctx: EventContext, name: str, time_str: str):
+        """添加定时任务"""
+        if not name or not time_str:
+            raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
+        
+        if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
+            raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
-        # 获取正确的会话类型（兼容不同框架版本）
         try:
-            launcher_type = ctx.event.launcher_type.value  # 适配枚举类型框架
+            launcher_type = ctx.event.launcher_type.value
             launcher_type_name = ctx.event.launcher_type.name
         except AttributeError:
-            launcher_type = str(ctx.event.launcher_type)  # 适配字符串类型框架
+            launcher_type = str(ctx.event.launcher_type)
             launcher_type_name = launcher_type
 
-        # 脚本存在性检查
         script_path = os.path.join(self.data_dir, f"{name}.py")
         if not os.path.exists(script_path):
             available = ", ".join(f.replace('.py', '') for f in os.listdir(self.data_dir))
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
-        # 构建任务对象
         new_task = {
             "script_name": name,
             "time": time_str,
@@ -204,22 +197,20 @@ async def _add_task(self, ctx: EventContext, name: str, time_str: str):
         }
         new_task["task_id"] = generate_task_id(new_task)
         
-        # 冲突检测
         if any(t["task_id"] == new_task["task_id"] for t in self.tasks):
             raise ValueError(f"该时段任务已存在（ID: {new_task['task_id']}）")
             
         self.tasks.append(new_task)
         self._save_tasks()
     
-    # 成功提示（现在位于async方法内部）
-    reply_msg = (
-        "✅ 定时任务创建成功\n"
-        f"名称：{name}\n"
-        f"时间：每日 {time_str}\n"
-        f"绑定到：{launcher_type_name}\n"
-        f"任务ID：{new_task['task_id']}"
-    )
-    await ctx.reply(MessageChain([Plain(reply_msg)])) 
+        reply_msg = (
+            "✅ 定时任务创建成功\n"
+            f"名称：{name}\n"
+            f"时间：每日 {time_str}\n"
+            f"绑定到：{launcher_type_name}\n"
+            f"任务ID：{new_task['task_id']}"
+        )
+        await ctx.reply(MessageChain([Plain(reply_msg)])) 
 
     async def _delete_task(self, ctx: EventContext, identifier: str):
         """删除当前会话的任务"""
@@ -233,7 +224,6 @@ async def _add_task(self, ctx: EventContext, name: str, time_str: str):
             await ctx.reply(MessageChain([Plain("当前会话没有定时任务")]))
             return
             
-        # 匹配任务
         deleted = []
         for task in current_tasks.copy():
             if identifier in (task["task_id"], task["script_name"]):
@@ -246,7 +236,6 @@ async def _add_task(self, ctx: EventContext, name: str, time_str: str):
             
         self._save_tasks()
         
-        # 生成报告
         report = ["✅ 已删除以下任务："]
         for task in deleted:
             report.append(
