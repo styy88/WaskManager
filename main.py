@@ -15,14 +15,18 @@ china_tz = timezone(timedelta(hours=8))
 class TaskManagerPlugin(BasePlugin):
     def __init__(self, host: APIHost):
         super().__init__(host)
+        print("[插件初始化] 开始加载插件...")  # 初始化开始
+        
+        self.host = host
         self.tasks = []
-        self.data_dir = os.path.join(os.path.dirname(__file__), "data")
-        self.tasks_file = os.path.join(os.path.dirname(__file__), "tasks.json")
+        self.lock = asyncio.Lock()
+        self.command_queue = asyncio.Queue()
+        self.check_timer_task = None
+        
+        # 初始化目录
+        self.data_dir = os.path.join(os.path.dirname(__file__), 'data')
         os.makedirs(self.data_dir, exist_ok=True)
-    
-    async def initialize(self):
-        self.load_tasks()
-        self.check_task = asyncio.create_task(self.schedule_checker())
+        print(f"[目录检查] 数据存储路径: {self.data_dir}")  # 路径确认
         
     def load_tasks(self):
         """加载定时任务"""
