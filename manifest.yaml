@@ -1,0 +1,30 @@
+# manifest.yaml
+apiVersion: v1
+kind: Plugin
+metadata:
+  author: xiaoxin
+  name: TaskManager
+  repository: 'https://github.com/styy88/TaskManager'
+  version: 2.0.0
+  description:
+    en_US: Task scheduler plugin for LangBot
+    zh_Hans: 定时任务管理插件
+  label:
+    en_US: Task Manager
+    zh_Hans: 定时任务管理插件
+spec:
+  config:
+    - name: admin_users
+      label:
+        en_US: Admin Users
+        zh_Hans: 管理员列表
+      description:
+        en_US: Users allowed to manage tasks (comma separated)
+        zh_Hans: 允许管理任务的用户列表（逗号分隔）
+      type: string
+      default: ''
+      required: false
+execution:
+  python:
+    path: main.py
+    attr: TaskManagerPlugin
