@@ -5,7 +5,7 @@ metadata:
   author: xiaoxin
   name: ZaskManager
   repository: 'https://github.com/styy88/WaskManager'
-  version: 3.5.0
+  version: 3.5
   description:
     en_US: Task scheduler plugin for LangBot
     zh_Hans: 全功能定时任务插件
