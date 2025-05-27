@@ -23,12 +23,6 @@ class TaskManagerPlugin(BasePlugin):
     
     async def initialize(self):
         self.load_tasks()
-        await self.restart_scheduler()
-        self.ap.logger.info("插件初始化完成")
-
-    async def restart_scheduler(self):
-        if hasattr(self, "check_task"):
-            self.check_task.cancel()
         self.check_task = asyncio.create_task(self.schedule_checker())
 
     def load_tasks(self):
