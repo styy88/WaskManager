@@ -9,7 +9,7 @@ metadata:
   description:
     zh_Hans: 支持中文脚本的全功能定时任务插件
   label:
-    zh_Hans: 任务管家
+    zh_Hans: 全功能定时任务插件
 spec:
   config:
     - name: max_log_size
