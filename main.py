@@ -1,5 +1,5 @@
 from pkg.plugin.context import register, handler, BasePlugin, APIHost, EventContext
-from pkg.plugin.events import GroupMessageReceived, PersonMessageReceived
+from pkg.plugin.events import GroupNormalMessageReceived, PersonNormalMessageReceived
 from pkg.platform.types import *
 import os
 import re
@@ -13,10 +13,10 @@ from typing import Dict, List, Set
 china_tz = timezone(timedelta(hours=8))
 
 def generate_task_id(script_name: str, time_str: str) -> str:
-    """生成唯一任务ID"""
-    return f"{script_name}_{time_str.replace(':', '')}"
+    """生成唯一任务ID（保留冒号版本）"""
+    return f"{script_name}_{time_str.replace(':', '-')}"
 
-@register(name="WaskManager", description="全功能定时任务插件", version="3.1", author="xiaoxin")
+@register(name="WaskManager", description="全功能定时任务管理", version="3.2", author="xiaoxin")
 class WaskManagerPlugin(BasePlugin):
     def __init__(self, host: APIHost):
         super().__init__(host)
@@ -33,29 +33,25 @@ class WaskManagerPlugin(BasePlugin):
 
     async def restart_scheduler(self):
         """重启调度器"""
-        # 取消所有现有定时器
         for task_id, timer in self.task_timers.items():
             timer.cancel()
         self.task_timers.clear()
-        
-        # 重新创建检查任务
         self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
     def load_tasks(self):
-        """加载存储的任务"""
-        if os.path.exists(self.tasks_file):
-            try:
+        """增强加载逻辑"""
+        try:
+            if os.path.exists(self.tasks_file):
                 with open(self.tasks_file, "r", encoding="utf-8") as f:
-                    raw_tasks = json.load(f)
-                    # 兼容旧版本数据
-                    self.tasks = [
-                        {**task, "task_id": task.get("task_id") or generate_task_id(task["script_name"], task["time"])}
-                        for task in raw_tasks
-                    ]
-                self.ap.logger.info(f"成功加载 {len(self.tasks)} 个定时任务")
-            except Exception as e:
-                self.ap.logger.error(f"任务加载失败: {str(e)}")
-                self.tasks = []
+                    self.tasks = json.load(f)
+                # ID兼容处理
+                for task in self.tasks:
+                    if "task_id" not in task:
+                        task["task_id"] = generate_task_id(task["script_name"], task["time"])
+                self.ap.logger.info(f"Loaded {len(self.tasks)} tasks")
+        except Exception as e:
+            self.ap.logger.error(f"加载失败: {str(e)}")
+            self.tasks = []
 
     def save_tasks(self):
         """持久化存储任务"""
@@ -164,118 +160,72 @@ class WaskManagerPlugin(BasePlugin):
         except Exception as e:
             raise RuntimeError(f"未知错误: {str(e)}")
 
-    @handler(GroupMessageReceived)
-    @handler(PersonMessageReceived)
+    @handler(GroupNormalMessageReceived)  # 关键修改点2
+    @handler(PersonNormalMessageReceived)
     async def message_handler(self, ctx: EventContext):
-        msg = str(ctx.event.message_chain).strip()
-        parts = msg.split(maxsplit=3)
-        
+        """增强型消息处理器"""
         try:
+            msg = str(ctx.event.message_chain).strip()
+            
+            # 严格命令过滤（关键修改点3）
+            if not (msg.startswith('/定时') or msg.startswith('/执行')):
+                return
+                
+            parts = msg.split(maxsplit=3)
+            
+            # 处理命令
             if parts[0] == "/定时":
                 await self.handle_schedule_command(ctx, parts)
             elif parts[0] == "/执行":
                 await self.handle_execute_command(ctx, parts)
                 
+            # 阻断后续处理（关键修改点4）
+            ctx.prevent_default()  
+            ctx.event.handled = True  # 部分框架需要此标记
+            
         except Exception as e:
             await ctx.reply(MessageChain([Plain(f"❌ 错误: {str(e)}")]))
             ctx.prevent_default()
-
-    async def handle_schedule_command(self, ctx: EventContext, parts: List[str]):
-        """处理定时命令"""
-        if parts[1] == "添加" and len(parts) == 4:
-            await self.add_task(ctx, parts[2], parts[3])
-        elif parts[1] == "删除":
-            await self.delete_task(ctx, parts[2] if len(parts)>=3 else None)
-        elif parts[1] == "列出":
-            await self.list_tasks(ctx)
-        else:
-            raise ValueError("无效命令格式")
-
-    async def handle_execute_command(self, ctx: EventContext, parts: List[str]):
-        """处理立即执行命令"""
-        if len(parts) < 2:
-            raise ValueError("缺少脚本名称")
-            
-        output = await self.execute_script(parts[1])
-        await ctx.reply(MessageChain([Plain(f"✅ 执行成功\n{output[:1500]}")]))
-        ctx.prevent_default()
-
-    async def add_task(self, ctx: EventContext, name: str, time_str: str):
-        """添加新任务"""
-        # 验证时间格式
-        if not re.fullmatch(r"^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$", time_str):
-            raise ValueError("时间格式应为 HH:MM (24小时制)")
-            
-        # 检查脚本存在性
-        script_path = os.path.join(self.data_dir, f"{name}.py")
-        if not os.path.exists(script_path):
-            raise FileNotFoundError(f"脚本不存在，请先创建 {name}.py")
-            
-        # 生成任务ID
-        task_id = generate_task_id(name, time_str)
-        
-        # 防止重复添加
-        if any(t["task_id"] == task_id and t["target_id"] == ctx.event.launcher_id for t in self.tasks):
-            raise ValueError("相同任务已存在")
-            
-        # 添加任务
-        self.tasks.append({
-            "task_id": task_id,
-            "script_name": name,
-            "time": time_str,
-            "target_type": ctx.event.launcher_type,
-            "target_id": ctx.event.launcher_id,
-            "last_run": None,
-            "created": datetime.now(china_tz).isoformat()
-        })
-        self.save_tasks()
-        
-        await ctx.reply(MessageChain([Plain(
-            f"✅ 定时任务创建成功\n"
-            f"名称：{name}\n"
-            f"时间：每日 {time_str}\n"
-            f"ID：{task_id}"
-        )]))
+            ctx.event.handled = True
+            raise
 
     async def delete_task(self, ctx: EventContext, identifier: str = None):
-        """删除任务（支持ID或名称）"""
+        """增强删除逻辑"""
         target_id = ctx.event.launcher_id
+        deleted = []
         
-        # 获取要删除的任务
-        to_delete = []
         for task in self.tasks.copy():
-            # 匹配当前会话的任务
             if task["target_id"] != target_id:
                 continue
                 
-            # ID匹配或名称匹配
-            if identifier in (task["task_id"], task["script_name"]):
-                to_delete.append(task)
-                
-        # 执行删除
-        if not to_delete:
-            raise ValueError("未找到匹配任务")
-            
-        # 取消关联定时器
-        for task in to_delete:
-            if timer := self.task_timers.pop(task["task_id"], None):
-                timer.cancel()
-            self.tasks.remove(task)
-            
-        self.save_tasks()
-        
-        # 生成报告
-        report = ["✅ 已删除以下任务："]
-        for task in to_delete:
-            report.append(
-                f"· {task['script_name']} ({task['time']}) "
-                f"[ID: {task['task_id']}]"
+            # 支持两种匹配方式（关键修改点5）
+            match_condition = (
+                identifier == task["task_id"] or  # 完全匹配ID
+                identifier == task["script_name"]  # 匹配脚本名称
             )
             
+            if match_condition:
+                deleted.append(task)
+                if timer := self.task_timers.pop(task["task_id"], None):
+                    timer.cancel()
+                self.tasks.remove(task)
+        
+        if not deleted:
+            raise ValueError(f"未找到任务: {identifier}")
+        
+        self.save_tasks()
+        
+        # 生成友好报告
+        report = [f"✅ 已删除 {len(deleted)} 个任务:"]
+        for task in deleted:
+            report.append(
+                f"· {task['script_name']} ({task['time']})\n"
+                f"  ID: {task['task_id']}"
+            )
         await ctx.reply(MessageChain([Plain("\n".join(report))]))
 
     async def list_tasks(self, ctx: EventContext):
-        """列出当前会话的任务"""
+        """优化列表显示"""
         target_id = ctx.event.launcher_id
         my_tasks = [t for t in self.tasks if t["target_id"] == target_id]
         
@@ -283,26 +233,23 @@ class WaskManagerPlugin(BasePlugin):
             await ctx.reply(MessageChain([Plain("当前没有定时任务")]))
             return
             
-        report = ["📅 您的定时任务列表"]
+        report = ["📅 您的定时任务列表 (输入/定时 删除 [ID或名称] 来管理)"]
         for task in my_tasks:
-            status = "✅ 已激活" if task["task_id"] in self.task_timers else "⏸ 等待中"
-            last_run = datetime.fromisoformat(task["last_run"]).strftime("%m-%d %H:%M") if task["last_run"] else "从未执行"
+            status = "✅ 运行中" if task["task_id"] in self.task_timers else "⏸ 待触发"
+            last_run = datetime.fromisoformat(task["last_run"]).strftime("%m/%d %H:%M") if task["last_run"] else "尚未执行"
             report.append(
                 f"🔹 {task['script_name']}\n"
-                f"  时间：每日 {task['time']}\n"
-                f"  状态：{status}\n"
+                f"  每日时间：{task['time']}\n"
+                f"  任务状态：{status}\n"
                 f"  最后执行：{last_run}\n"
-                f"  ID：{task['task_id']}\n"
-                "━━━━━━━━━━━━"
+                f"  唯一标识：{task['task_id']}\n"
+                "━━━━━━━━━━━━━━"
             )
-            
         await ctx.reply(MessageChain([Plain("\n".join(report))]))
 
     def __del__(self):
-        """清理资源"""
-        # 取消所有定时器
-        for timer in self.task_timers.values():
-            timer.cancel()
-        # 取消调度器
+        """增强资源清理"""
         if hasattr(self, "schedule_checker_task"):
             self.schedule_checker_task.cancel()
+        for timer in self.task_timers.values():
+            timer.cancel()
