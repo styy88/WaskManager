@@ -88,17 +88,15 @@ class TaskManagerPlugin(BasePlugin):
         last_run = datetime.fromisoformat(task["last_run"]) if task.get("last_run") else None
         return not last_run or (now - last_run).total_seconds() >= 86400
 
-    async def execute_script(self, script_name: str):
-    """支持原生中文文件名"""
+async def execute_script(self, script_name: str):
+    """支持原生中文文件名"""  # ✅ 正确缩进
     script_path = os.path.join(self.data_dir, f"{script_name}.py")
     
     # 调试日志
-    self.ap.logger.debug(f"尝试加载脚本: {script_path}")
+    self.ap.logger.debug(f"脚本路径检查: {script_path} 是否存在: {os.path.exists(script_path)}")
     
     if not os.path.exists(script_path):
-        available_files = ", ".join(os.listdir(self.data_dir))
-        self.ap.logger.error(f"可用脚本文件: {available_files}")
-        raise FileNotFoundError(f"脚本不存在: {script_name}.py")
+        raise FileNotFoundError(f"脚本文件不存在: {script_name}.py")
 
     try:
         result = subprocess.run(
