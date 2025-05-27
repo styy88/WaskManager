@@ -3,9 +3,9 @@ apiVersion: v1
 kind: Plugin
 metadata:
   author: xiaoxin
-  name: WaskManager
+  name: ZaskManager
   repository: 'https://github.com/styy88/WaskManager'
-  version: 3.1.0
+  version: 3.5.0
   description:
     en_US: Task scheduler plugin for LangBot
     zh_Hans: 全功能定时任务插件
@@ -27,4 +27,4 @@ spec:
 execution:
   python:
     path: main.py
-    attr: WaskManagerPlugin
+    attr: ZaskManagerPlugin
