@@ -11,38 +11,6 @@ from datetime import datetime, timedelta, timezone
 
 # 创建UTC+8时区
 china_tz = timezone(timedelta(hours=8))
-import shutil  # 新增导入
-
-class TaskManagerPlugin(BasePlugin):
-    def __init__(self, host: APIHost):
-        super().__init__(host)
-        self.tasks = []
-        
-        # 目录定义
-        self.data_dir = os.path.join(os.path.dirname(__file__), "data")
-        self.temp_dir = os.path.join(os.path.dirname(__file__), "temp")  # 新增
-        
-        # 安全创建目录
-        self._safe_makedirs(self.data_dir)
-        self._safe_makedirs(self.temp_dir)
-        
-        # 文件路径
-        self.tasks_file = os.path.join(os.path.dirname(__file__), "tasks.json")
-        
-        # 句柄跟踪
-        self._temp_file_handles = []
-
-    def _safe_makedirs(self, path):
-        """安全创建目录"""
-        try:
-            os.makedirs(path, exist_ok=True)
-            self.ap.logger.debug(f"Directory ensured: {path}")
-        except Exception as e:
-            self.ap.logger.error(f"Failed to create directory: {path} - {str(e)}")
-            raise
-
-    def __del__(self):
-        # 清理逻辑...
 
 @register(name="TaskManager", description="全功能定时任务插件", version="3.0", author="xiaoxin")
 class TaskManagerPlugin(BasePlugin):
