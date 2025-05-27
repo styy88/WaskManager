@@ -9,10 +9,9 @@ import asyncio
 import subprocess
 from datetime import datetime, timedelta, timezone
 
-# 创建UTC+8时区
 china_tz = timezone(timedelta(hours=8))
 
-@register(name="TaskManager", description="全功能定时任务插件", version="3.0", author="xiaoxin")
+@register(name="TaskManager", description="定时任务管理插件", version="2.0", author="xiaoxin")
 class TaskManagerPlugin(BasePlugin):
     def __init__(self, host: APIHost):
         super().__init__(host)
@@ -24,157 +23,158 @@ class TaskManagerPlugin(BasePlugin):
     async def initialize(self):
         self.load_tasks()
         self.check_task = asyncio.create_task(self.schedule_checker())
-
+        
     def load_tasks(self):
+        """加载定时任务"""
         if os.path.exists(self.tasks_file):
             try:
                 with open(self.tasks_file, "r", encoding="utf-8") as f:
                     self.tasks = json.load(f)
-                self.ap.logger.info(f"成功加载 {len(self.tasks)} 个定时任务")
             except Exception as e:
-                self.ap.logger.error(f"任务加载失败: {str(e)}")
+                self.ap.logger.error(f"加载任务失败: {str(e)}")
 
     def save_tasks(self):
-        with open(self.tasks_file, "w", encoding="utf-8") as f:
-            json.dump(self.tasks, f, indent=2, ensure_ascii=False)
+        """保存定时任务"""
+        try:
+            with open(self.tasks_file, "w", encoding="utf-8") as f:
+                json.dump(self.tasks, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            self.ap.logger.error(f"保存任务失败: {str(e)}")
 
     async def schedule_checker(self):
-        self.ap.logger.info("定时检查器启动")
+        """定时任务检查循环"""
         while True:
-            await asyncio.sleep(30 - datetime.now().second % 30)
+            await asyncio.sleep(30)
             now = datetime.now(china_tz)
             current_time = now.strftime("%H:%M")
             
-            for task in self.tasks.copy():
+            for task in self.tasks:
                 if task["time"] == current_time and self.should_trigger(task, now):
-                    try:
-                        output = await self.execute_script(task["script_name"])
-                        await self.send_task_result(
-                            task["target_type"],
-                            task["target_id"],
-                            output
-                        )
-                        task["last_run"] = now.isoformat()
-                        self.save_tasks()
-                    except Exception as e:
-                        self.ap.logger.error(f"任务执行失败: {str(e)}")
-
-    async def send_task_result(self, target_type, target_id, message):
-        try:
-            await self.host.send_active_message(
-                adapter=self.host.get_platform_adapters()[0],
-                target_type=target_type,
-                target_id=str(target_id),
-                message=MessageChain([Plain(message[:2000])])
-            )
-        except Exception as e:
-            self.ap.logger.error(f"消息发送失败: {str(e)}")
+                    await self.execute_script(task["name"])
+                    task["last_run"] = now.isoformat()
+                    self.save_tasks()
 
     def should_trigger(self, task, now):
+        """判断是否应该触发"""
         last_run = datetime.fromisoformat(task["last_run"]) if task.get("last_run") else None
-        if last_run and last_run > now:
-            return False
-        return not last_run or (now - last_run).total_seconds() >= 86400
+        return not last_run or (now - last_run).total_seconds() > 86400
 
     async def execute_script(self, script_name: str):
-        """支持中文脚本文件名的执行方法"""
+        """执行指定脚本"""
         script_path = os.path.join(self.data_dir, f"{script_name}.py")
-        
-        self.ap.logger.debug(f"正在检查脚本路径: {script_path}")
         if not os.path.exists(script_path):
-            available_files = ", ".join(os.listdir(self.data_dir))
-            self.ap.logger.error(f"可用脚本文件: {available_files}")
-            raise FileNotFoundError(f"脚本文件不存在: {script_name}.py")
+            raise FileNotFoundError(f"脚本 {script_name}.py 不存在")
 
         try:
             result = subprocess.run(
                 ["python", script_path],
                 capture_output=True,
                 text=True,
-                timeout=30,
-                encoding="utf-8"
+                timeout=30
             )
-            
-            if result.returncode != 0:
-                raise RuntimeError(f"脚本执行失败: {result.stderr}")
-            
             return result.stdout
-        except subprocess.TimeoutExpired:
-            raise TimeoutError("脚本执行超时（30秒）")
         except Exception as e:
-            raise
+            self.ap.logger.error(f"执行脚本失败: {str(e)}")
+            return None
 
+    # 消息处理器
     @handler(GroupMessageReceived)
     @handler(PersonMessageReceived)
     async def message_handler(self, ctx: EventContext):
+        """统一消息处理"""
         msg = str(ctx.event.message_chain).strip()
-        parts = msg.split(maxsplit=3)
-        
+        parts = msg.split()
+        is_processed = False
+
         try:
-            # 处理 /执行 命令
+            # 执行即时命令
             if len(parts) >= 2 and parts[0] == "/执行":
                 script_name = parts[1]
                 output = await self.execute_script(script_name)
-                await ctx.reply(MessageChain([Plain(f"✅ 执行成功\n{output[:1500]}")]))
-                ctx.prevent_default()
+                reply = output if output else f"已执行脚本: {script_name}"
+                await ctx.reply(MessageChain([Plain(reply)]))
+                is_processed = True
 
-            # 处理 /定时 命令
+            # 定时任务管理
             elif len(parts) >= 2 and parts[0] == "/定时":
                 if parts[1] == "添加" and len(parts) == 4:
                     await self.add_task(ctx, parts[2], parts[3])
-                    ctx.prevent_default()
+                    is_processed = True
                 elif parts[1] == "删除" and len(parts) == 3:
-                    await self.delete_task(parts[2])
-                    ctx.prevent_default()
-                elif parts[1] == "列出":
+                    await self.delete_task(ctx, parts[2])
+                    is_processed = True
+                elif parts[1] == "列出" and len(parts) == 2:
                     await self.list_tasks(ctx)
-                    ctx.prevent_default()
+                    is_processed = True
+
+            if is_processed:
+                ctx.prevent_default()
+                self.ap.logger.info(f"处理命令: {msg} [用户:{ctx.event.sender_id}]")
 
         except Exception as e:
-            await ctx.reply(MessageChain([Plain(f"❌ 错误: {str(e)}")]))
+            self.ap.logger.error(f"命令处理失败: {str(e)}")
+            await ctx.reply(MessageChain([Plain(f"命令执行失败: {str(e)}")]))
             ctx.prevent_default()
 
+    # 定时任务管理功能
     async def add_task(self, ctx: EventContext, name: str, time_str: str):
+        """添加定时任务"""
+        # 参数验证
+        if not re.match(r"^[\w-]+$", name):
+            await ctx.reply(MessageChain([Plain("任务名称只能包含字母、数字和下划线")]))
+            return
+
         if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
-            raise ValueError("时间格式应为 HH:MM")
+            await ctx.reply(MessageChain([Plain("时间格式应为HH:MM，例如08:30")]))
+            return
+
+        if any(t["name"] == name for t in self.tasks):
+            await ctx.reply(MessageChain([Plain("该任务名称已存在")]))
+            return
 
         script_path = os.path.join(self.data_dir, f"{name}.py")
         if not os.path.exists(script_path):
-            raise FileNotFoundError(f"请先在data目录创建 {name}.py")
+            await ctx.reply(MessageChain([Plain(f"脚本 {name}.py 不存在，请先创建")]))
+            return
 
+        # 添加任务
         self.tasks.append({
-            "script_name": name,
+            "name": name,
             "time": time_str,
-            "target_type": ctx.event.launcher_type,
-            "target_id": ctx.event.launcher_id,
             "last_run": None,
             "created": datetime.now(china_tz).isoformat()
         })
         self.save_tasks()
-        await ctx.reply(MessageChain([Plain(f"✅ 定时任务已创建\n名称: {name}\n时间: 每日 {time_str}")]))
+        await ctx.reply(MessageChain([Plain(f"✅ 已创建定时任务\n名称: {name}\n时间: 每天 {time_str}")]))
 
-    async def delete_task(self, name: str):
+    async def delete_task(self, ctx: EventContext, name: str):
+        """删除定时任务"""
         original_count = len(self.tasks)
-        self.tasks = [t for t in self.tasks if t["script_name"] != name]
-        if len(self.tasks) == original_count:
-            raise ValueError("未找到指定任务")
-        self.save_tasks()
+        self.tasks = [t for t in self.tasks if t["name"] != name]
+        
+        if len(self.tasks) < original_count:
+            self.save_tasks()
+            await ctx.reply(MessageChain([Plain(f"✅ 已删除任务: {name}")]))
+        else:
+            await ctx.reply(MessageChain([Plain("❌ 未找到指定任务")]))
 
     async def list_tasks(self, ctx: EventContext):
+        """列出所有定时任务"""
         if not self.tasks:
             await ctx.reply(MessageChain([Plain("当前没有定时任务")]))
             return
 
-        task_list = ["📅 当前定时任务列表"]
-        for task in self.tasks:
-            status = "✅ 已激活" if task.get("last_run") else "⏳ 待触发"
+        task_list = ["📅 定时任务列表："]
+        for idx, task in enumerate(self.tasks, 1):
+            last_run = datetime.fromisoformat(task["last_run"]).strftime("%m-%d %H:%M") if task["last_run"] else "从未执行"
             task_list.append(
-                f"名称: {task['script_name']}\n"
-                f"时间: 每日 {task['time']}\n"
-                f"状态: {status}\n"
-                "━━━━━━━━━━━━━━"
+                f"{idx}. {task['name']}\n"
+                f"   ▪ 每日执行时间: {task['time']}\n"
+                f"   ▪ 上次执行: {last_run}\n"
+                f"   ▪ 创建于: {task['created'][:10]}"
             )
-        await ctx.reply(MessageChain([Plain("\n".join(task_list))]))
+
+        await ctx.reply(MessageChain([Plain("\n\n".join(task_list))]))
 
     def __del__(self):
         if hasattr(self, "check_task"):
