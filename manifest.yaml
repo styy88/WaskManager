@@ -5,13 +5,13 @@ metadata:
   author: xiaoxin
   name: WaskManager
   repository: 'https://github.com/styy88/WaskManager'
-  version: 2.0.0
+  version: 3.1.0
   description:
     en_US: Task scheduler plugin for LangBot
-    zh_Hans: 定时任务管理插件
+    zh_Hans: 全功能定时任务插件
   label:
     en_US: Wask Manager
-    zh_Hans: 定时任务管理插件
+    zh_Hans: 全功能定时任务插件
 spec:
   config:
     - name: admin_users
