@@ -169,15 +169,15 @@ class ZaskManagerPlugin(BasePlugin):
         output = await self._execute_script(parts[1])
         await ctx.reply(MessageChain([Plain(f"✅ 执行成功\n{output[:1500]}")]))
 
-    async def _add_task(self, ctx: EventContext, name: str, time_str: str):
-        """修复类型兼容性的添加任务方法"""
-        # 参数校验增强
-        if not name or not time_str:
-            raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
-        
-        # 时间格式校验
-        if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
-            raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
+async def _add_task(self, ctx: EventContext, name: str, time_str: str):
+    """修复类型兼容性的添加任务方法"""
+    # 参数校验增强
+    if not name or not time_str:
+        raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
+    
+    # 时间格式校验
+    if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
+        raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
         # 获取正确的会话类型（兼容不同框架版本）
         try:
@@ -211,7 +211,7 @@ class ZaskManagerPlugin(BasePlugin):
         self.tasks.append(new_task)
         self._save_tasks()
     
-    # 成功提示
+    # 成功提示（现在位于async方法内部）
     reply_msg = (
         "✅ 定时任务创建成功\n"
         f"名称：{name}\n"
