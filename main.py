@@ -55,7 +55,7 @@ class ZaskManagerPlugin(BasePlugin):
     def _save_tasks(self):
         """安全保存任务数据"""
         with open(self.tasks_file, "w", encoding="utf-8") as f:
-            json.dump(self.tasks, f, indent=2, ensure_asciii=False)
+            json.dump(self.tasks, f, indent=2, ensure_ascii=False)
 
     async def schedule_checker(self):
         """定时任务检查器"""
