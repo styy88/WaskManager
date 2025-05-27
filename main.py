@@ -175,18 +175,23 @@ class ZaskManagerPlugin(BasePlugin):
         if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
             raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
-        try:
-            launcher_type = ctx.event.launcher_type.value
-            launcher_type_name = ctx.event.launcher_type.name
-        except AttributeError:
-            launcher_type = str(ctx.event.launcher_type)
-            launcher_type_name = launcher_type
+        # 获取会话类型（兼容处理）
+        launcher_type = str(getattr(ctx.event, 'launcher_type', ''))
+        # 显示名称映射
+        type_mapping = {
+            "group": "群聊",
+            "private": "私聊",
+            "temp": "临时会话"
+        }
+        launcher_type_name = type_mapping.get(launcher_type, launcher_type)
 
+        # 脚本存在性检查
         script_path = os.path.join(self.data_dir, f"{name}.py")
         if not os.path.exists(script_path):
             available = ", ".join(f.replace('.py', '') for f in os.listdir(self.data_dir))
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
+        # 构建任务对象
         new_task = {
             "script_name": name,
             "time": time_str,
@@ -197,6 +202,7 @@ class ZaskManagerPlugin(BasePlugin):
         }
         new_task["task_id"] = generate_task_id(new_task)
         
+        # 冲突检测
         if any(t["task_id"] == new_task["task_id"] for t in self.tasks):
             raise ValueError(f"该时段任务已存在（ID: {new_task['task_id']}）")
             
@@ -214,9 +220,10 @@ class ZaskManagerPlugin(BasePlugin):
 
     async def _delete_task(self, ctx: EventContext, identifier: str):
         """删除当前会话的任务"""
+        current_launcher_type = str(getattr(ctx.event, 'launcher_type', ''))
         current_tasks = [
             t for t in self.tasks 
-            if t["target_type"] == ctx.event.launcher_type.value 
+            if t["target_type"] == current_launcher_type
             and t["target_id"] == str(ctx.event.launcher_id)
         ]
         
@@ -247,9 +254,10 @@ class ZaskManagerPlugin(BasePlugin):
 
     async def _list_tasks(self, ctx: EventContext):
         """列出当前会话任务"""
+        current_launcher_type = str(getattr(ctx.event, 'launcher_type', ''))
         current_tasks = [
             t for t in self.tasks 
-            if t["target_type"] == ctx.event.launcher_type.value 
+            if t["target_type"] == current_launcher_type
             and t["target_id"] == str(ctx.event.launcher_id)
         ]
         
@@ -259,7 +267,7 @@ class ZaskManagerPlugin(BasePlugin):
             
         task_list = [
             "📅 当前会话定时任务列表",
-            f"会话类型：{ctx.event.launcher_type.name}",
+            f"会话类型：{current_launcher_type}",
             f"会话ID：{ctx.event.launcher_id}",
             "━━━━━━━━━━━━━━━━"
         ]
