@@ -16,7 +16,7 @@ def generate_task_id(script_name: str, time_str: str) -> str:
     """生成唯一任务ID"""
     return f"{script_name}_{time_str.replace(':', '')}"
 
-@register(name="WaskManagerPro", description="增强版定时任务管理", version="3.1", author="xiaoxin")
+@register(name="WaskManager", description="全功能定时任务插件", version="3.1", author="xiaoxin")
 class WaskManagerPlugin(BasePlugin):
     def __init__(self, host: APIHost):
         super().__init__(host)
