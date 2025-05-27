@@ -11,22 +11,24 @@ from datetime import datetime, timedelta, timezone
 
 china_tz = timezone(timedelta(hours=8))
 
-@register(name="TaskManager", description="定时任务管理插件", version="2.0", author="xiaoxin")
-class TaskManagerPlugin(BasePlugin):
+@register(name="WaskManager", description="定时任务管理插件", version="2.0", author="xiaoxin")
+class WaskManagerPlugin(BasePlugin):
     def __init__(self, host: APIHost):
         super().__init__(host)
-        print("[插件初始化] 开始加载插件...")  # 初始化开始
-        
-        self.host = host
         self.tasks = []
-        self.lock = asyncio.Lock()
-        self.command_queue = asyncio.Queue()
-        self.check_timer_task = None
-        
-        # 初始化目录
-        self.data_dir = os.path.join(os.path.dirname(__file__), 'data')
+        self.data_dir = os.path.join(os.path.dirname(__file__), "data")
+        self.tasks_file = os.path.join(os.path.dirname(__file__), "tasks.json")
         os.makedirs(self.data_dir, exist_ok=True)
-        print(f"[目录检查] 数据存储路径: {self.data_dir}")  # 路径确认
+    
+    async def initialize(self):
+        self.load_tasks()
+        await self.restart_scheduler()
+        self.ap.logger.info("插件初始化完成")
+
+    async def restart_scheduler(self):
+        if hasattr(self, "check_task"):
+            self.check_task.cancel()
+        self.check_task = asyncio.create_task(self.schedule_checker())
         
     def load_tasks(self):
         """加载定时任务"""
