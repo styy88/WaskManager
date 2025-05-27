@@ -89,14 +89,18 @@ class TaskManagerPlugin(BasePlugin):
         return not last_run or (now - last_run).total_seconds() >= 86400
 
     async def execute_script(self, script_name: str):
-        """支持中文文件名的脚本执行"""
-        # 将中文转换为安全文件名
-        safe_name = urllib.parse.quote(script_name, safe='')
-        script_path = os.path.join(self.data_dir, f"{safe_name}.py")
-        
-        if not os.path.exists(script_path):
-            raise FileNotFoundError(f"脚本文件不存在: {script_name}.py")
+    """支持原生中文文件名"""
+    script_path = os.path.join(self.data_dir, f"{script_name}.py")
+    
+    # 调试日志
+    self.ap.logger.debug(f"尝试加载脚本: {script_path}")
+    
+    if not os.path.exists(script_path):
+        available_files = ", ".join(os.listdir(self.data_dir))
+        self.ap.logger.error(f"可用脚本文件: {available_files}")
+        raise FileNotFoundError(f"脚本不存在: {script_name}.py")
 
+    try:
         result = subprocess.run(
             ["python", script_path],
             capture_output=True,
@@ -106,9 +110,12 @@ class TaskManagerPlugin(BasePlugin):
         )
         
         if result.returncode != 0:
-            raise RuntimeError(f"脚本执行失败: {result.stderr}")
-        
+            raise RuntimeError(f"执行失败: {result.stderr}")
+            
         return result.stdout
+    except Exception as e:
+        self.ap.logger.error(f"脚本执行异常: {str(e)}")
+        raise
 
     @handler(GroupMessageReceived)
     @handler(PersonMessageReceived)
