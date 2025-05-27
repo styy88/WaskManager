@@ -16,8 +16,8 @@ def generate_task_id(task: Dict) -> str:
     """生成唯一任务标识"""
     return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['target_type'][0]}_{task['target_id']}"
 
-@register(name="WaskManager", description="全功能定时任务插件", version="3.5", author="xiaoxin")
-class WaskManagerPlugin(BasePlugin):
+@register(name="ZaskManager", description="全功能定时任务插件", version="3.5", author="xiaoxin")
+class ZaskManagerPlugin(BasePlugin):
     def __init__(self, host: APIHost):
         super().__init__(host)
         self.tasks: List[Dict] = []
