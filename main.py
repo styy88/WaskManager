@@ -171,11 +171,15 @@ class ZaskManagerPlugin(BasePlugin):
 
     async def _add_task(self, ctx: EventContext, name: str, time_str: str):
     """修复类型兼容性的添加任务方法"""
-    # 时间格式验证
+    # 参数校验增强
+    if not name or not time_str:
+        raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
+    
+    # 时间格式校验
     if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
         raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
-    # 获取会话类型（兼容枚举和字符串）
+    # 获取正确的会话类型（兼容不同框架版本）
     try:
         launcher_type = ctx.event.launcher_type.value  # 适配枚举类型框架
         launcher_type_name = ctx.event.launcher_type.name
@@ -215,7 +219,7 @@ class ZaskManagerPlugin(BasePlugin):
         f"绑定到：{launcher_type_name}\n"
         f"任务ID：{new_task['task_id']}"
     )
-    await ctx.reply(MessageChain([Plain(reply_msg)]))
+    await ctx.reply(MessageChain([Plain(reply_msg)])) 
 
     async def _delete_task(self, ctx: EventContext, identifier: str):
         """删除当前会话的任务"""
