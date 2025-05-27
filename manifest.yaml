@@ -4,26 +4,19 @@ kind: Plugin
 metadata:
   author: xiaoxin
   name: TaskManager
-  repository: 'https://github.com/styy88/TaskManager'
-  version: 1.0.0
+  repository: 'https://github.com/yourrepo/TaskManager'
+  version: 2.2.0
   description:
-    en_US: Task scheduler plugin for LangBot
-    zh_Hans: LangBot定时任务管理插件
+    zh_Hans: 支持中文脚本的全功能定时任务插件
   label:
-    en_US: Task Manager
-    zh_Hans: 任务管理器
+    zh_Hans: 任务管家
 spec:
   config:
-    - name: admin_users
+    - name: max_log_size
       label:
-        en_US: Admin Users
-        zh_Hans: 管理员列表
-      description:
-        en_US: Users allowed to manage tasks (comma separated)
-        zh_Hans: 允许管理任务的用户列表（逗号分隔）
-      type: string
-      default: ''
-      required: false
+        zh_Hans: 最大日志长度
+      type: integer
+      default: 2000
 execution:
   python:
     path: main.py
