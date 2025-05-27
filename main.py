@@ -15,22 +15,11 @@ china_tz = timezone(timedelta(hours=8))
 @register(name="TaskManager", description="全功能定时任务插件", version="3.0", author="xiaoxin")
 class TaskManagerPlugin(BasePlugin):
     def __init__(self, host: APIHost):
-    super().__init__(host)
-    try:
-        # 使用宿主程序的标准数据目录
-        plugin_base_dir = os.path.join(self.ap.host.data_dir, "plugins", "TaskManager")
-        self.data_dir = os.path.join(plugin_base_dir, "data")
-        self.tasks_file = os.path.join(plugin_base_dir, "tasks.json")
-        
-        # 确保目录存在
-        os.makedirs(self.data_dir, exist_ok=True)
-        
-        # 初始化任务列表
+        super().__init__(host)
         self.tasks = []
-        self.load_tasks()
-    except Exception as e:
-        self.ap.logger.error(f"初始化失败: {str(e)}")
-        raise
+        self.data_dir = os.path.join(os.path.dirname(__file__), "data")
+        self.tasks_file = os.path.join(os.path.dirname(__file__), "tasks.json")
+        os.makedirs(self.data_dir, exist_ok=True)
     
     async def initialize(self):
         self.load_tasks()
