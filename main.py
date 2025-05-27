@@ -160,35 +160,31 @@ class WaskManagerPlugin(BasePlugin):
         except Exception as e:
             raise RuntimeError(f"未知错误: {str(e)}")
 
-    @handler(GroupNormalMessageReceived)  # 关键修改点2
-    @handler(PersonNormalMessageReceived)
-    async def message_handler(self, ctx: EventContext):
-        """增强型消息处理器"""
-        try:
-            msg = str(ctx.event.message_chain).strip()
+@handler(GroupNormalMessageReceived)
+@handler(PersonNormalMessageReceived)
+async def message_handler(self, ctx: EventContext):
+    """修复的事件处理函数"""
+    try:
+        msg = str(ctx.event.message_chain).strip()
+        
+        # 仅处理插件命令
+        if not (msg.startswith('/定时') or msg.startswith('/执行')):
+            return
             
-            # 严格命令过滤（关键修改点3）
-            if not (msg.startswith('/定时') or msg.startswith('/执行')):
-                return
-                
-            parts = msg.split(maxsplit=3)
+        parts = msg.split(maxsplit=3)
+        
+        if parts[0] == "/定时":
+            await self.handle_schedule_command(ctx, parts)
+        elif parts[0] == "/执行":
+            await self.handle_execute_command(ctx, parts)
             
-            # 处理命令
-            if parts[0] == "/定时":
-                await self.handle_schedule_command(ctx, parts)
-            elif parts[0] == "/执行":
-                await self.handle_execute_command(ctx, parts)
-                
-            # 阻断后续处理（关键修改点4）
-            ctx.prevent_default()  
-            ctx.event.handled = True  # 部分框架需要此标记
-            
-        except Exception as e:
-            await ctx.reply(MessageChain([Plain(f"❌ 错误: {str(e)}")]))
-            ctx.prevent_default()
-            ctx.event.handled = True
-            raise
+        # 阻断后续处理（关键）
+        ctx.prevent_default()
 
+    except Exception as e:
+        await ctx.reply(MessageChain([Plain(f"❌ 系统错误: {str(e)}")]))
+        ctx.prevent_default()
+        raise
     async def delete_task(self, ctx: EventContext, identifier: str = None):
         """增强删除逻辑"""
         target_id = ctx.event.launcher_id
