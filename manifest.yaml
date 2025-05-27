@@ -4,7 +4,7 @@ kind: Plugin
 metadata:
   author: xiaoxin
   name: WaskManager
-  repository: 'https://github.com/styy88/TaskManager'
+  repository: 'https://github.com/styy88/WaskManager'
   version: 2.0.0
   description:
     en_US: Task scheduler plugin for LangBot
