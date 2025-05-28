@@ -20,6 +20,8 @@
 <p>2.脚本命名规则：</p>
 <li>允许中文、字母、数字和下划线</li>
 <li>示例：定时.py、remaining_days.py、report.py</li>
+
 <p>3.脚本输出规范：</p>
 <li>支持 Markdown 格式图片：![描述](图片URL)</li>
+
 <p>4.其他文本内容将直接显示</p>
