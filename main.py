@@ -19,11 +19,11 @@ def generate_task_id(task: Dict) -> str:
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
-    def __init__(self, context: Context, config: dict = None):  # ✅ 添加默认值
+    def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
-        self.config = config or {}  # ✅ 处理空配置
+        self.config = config or {}
         
-        # 路径配置
+        # 路径配置（已修复）
         self.plugin_root = os.path.abspath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -32,32 +32,34 @@ class ZaskManager(Star):
                 "ZaskManager"
             )
         )
-        logger.debug(f"插件配置已加载: {self.config}")
+        self.tasks_file = os.path.join(self.plugin_root, "tasks.json")
+        os.makedirs(self.plugin_root, exist_ok=True)
+        logger.debug(f"插件数据目录初始化完成: {self.plugin_root}")
 
         self.tasks: List[Dict] = []
         self._load_tasks()
         self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
-    def _load_tasks(self):
-    """安全加载任务数据"""
-    try:
-        # 确保目录存在
-        if not os.path.exists(self.plugin_root):
-            os.makedirs(self.plugin_root, exist_ok=True)
-            logger.warning(f"检测到目录缺失，已重新创建: {self.plugin_root}")
-            
-        # 加载任务文件
-        if os.path.exists(self.tasks_file):
-            with open(self.tasks_file, "r", encoding="utf-8") as f:
-                raw_tasks = json.load(f)
-                self.tasks = [
-                    {**task, "task_id": task.get("task_id") or generate_task_id(task)}
-                    for task in raw_tasks
-                ]
-            logger.info(f"成功加载 {len(self.tasks)} 个定时任务")
-    except Exception as e:
-        logger.error(f"任务加载失败: {str(e)}")
-        self.tasks = []
+    def _load_tasks(self):  # ✅ 修复缩进
+        """安全加载任务数据"""
+        try:
+            # 确保目录存在
+            if not os.path.exists(self.plugin_root):
+                os.makedirs(self.plugin_root, exist_ok=True)
+                logger.warning(f"检测到目录缺失，已重新创建: {self.plugin_root}")
+                
+            # 加载任务文件
+            if os.path.exists(self.tasks_file):
+                with open(self.tasks_file, "r", encoding="utf-8") as f:
+                    raw_tasks = json.load(f)
+                    self.tasks = [
+                        {**task, "task_id": task.get("task_id") or generate_task_id(task)}
+                        for task in raw_tasks
+                    ]
+                logger.info(f"成功加载 {len(self.tasks)} 个定时任务")
+        except Exception as e:
+            logger.error(f"任务加载失败: {str(e)}")
+            self.tasks = []
 
     def _save_tasks(self):
         """安全保存任务数据"""
@@ -105,13 +107,13 @@ class ZaskManager(Star):
             logger.error(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
-        """执行脚本文件（修复路径）"""
-        script_path = os.path.join(self.plugin_root, f"{script_name}.py")  # ✅ 使用正确的根目录
+        """执行脚本文件（修复变量名）"""
+        script_path = os.path.join(self.plugin_root, f"{script_name}.py")  # ✅ 使用正确的 plugin_root
         
         if not os.path.exists(script_path):
             available = ", ".join(
                 f.replace('.py', '') 
-                for f in os.listdir(self.plugin_root)  # ✅ 使用 plugin_root
+                for f in os.listdir(self.plugin_root)
                 if f.endswith('.py')
             )
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
@@ -175,7 +177,7 @@ class ZaskManager(Star):
             yield event.plain_result(f"❌ 错误: {str(e)}")
 
     async def _add_task(self, event: AstrMessageEvent, name: str, time_str: str):
-        """添加定时任务"""
+        """添加定时任务（修复变量名）"""
         if not name or not time_str:
             raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
         
@@ -186,10 +188,10 @@ class ZaskManager(Star):
         target_type = "group" if event.group_id else "private"
         target_id = event.group_id or event.get_sender_id()
 
-        # 脚本存在性检查
-        script_path = os.path.join(self.data_dir, f"{name}.py")
+        # 脚本存在性检查（修复变量名）
+        script_path = os.path.join(self.plugin_root, f"{name}.py")  # ✅ 使用 plugin_root
         if not os.path.exists(script_path):
-            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.data_dir))
+            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root))
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
         # 构建任务对象
