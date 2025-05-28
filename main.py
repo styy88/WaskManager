@@ -1,6 +1,7 @@
-from pkg.plugin.context import register, handler, BasePlugin, APIHost, EventContext
-from pkg.plugin.events import GroupMessageReceived, PersonMessageReceived
-from pkg.platform.types import *
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.star import Context, Star, register
+from astrbot.api import logger
+from astrbot.api.message_components import Plain, Image  # 消息组件
 import os
 import re
 import json
@@ -16,26 +17,16 @@ def generate_task_id(task: Dict) -> str:
     """生成唯一任务标识"""
     return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['target_type'][0]}_{task['target_id']}"
 
-@register(name="ZaskManager", description="全功能定时任务插件", version="3.5", author="xiaoxin")
-class ZaskManagerPlugin(BasePlugin):
-    def __init__(self, host: APIHost):
-        super().__init__(host)
+@register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/yourrepo")
+class ZaskManager(Star):
+    def __init__(self, context: Context):
+        super().__init__(context)
         self.tasks: List[Dict] = []
-        self.data_dir = os.path.join(os.path.dirname(__file__), "data")
-        self.tasks_file = os.path.join(os.path.dirname(__file__), "tasks.json")
+        self.data_dir = os.path.join(context.data_dir, "ZaskManager")  # 使用标准data目录
+        self.tasks_file = os.path.join(self.data_dir, "tasks.json")
         os.makedirs(self.data_dir, exist_ok=True)
-    
-    async def initialize(self):
-        """初始化方法"""
         self._load_tasks()
-        await self.restart_scheduler()
-        self.ap.logger.info("插件初始化完成")
-
-    async def restart_scheduler(self):
-        """重启任务调度器"""
-        if hasattr(self, "check_task"):
-            self.check_task.cancel()
-        self.check_task = asyncio.create_task(self.schedule_checker())
+        asyncio.create_task(self.schedule_checker())
 
     def _load_tasks(self):
         """安全加载任务数据"""
@@ -47,9 +38,9 @@ class ZaskManagerPlugin(BasePlugin):
                         {**task, "task_id": task.get("task_id") or generate_task_id(task)}
                         for task in raw_tasks
                     ]
-                self.ap.logger.info(f"成功加载 {len(self.tasks)} 个定时任务")
+                logger.info(f"成功加载 {len(self.tasks)} 个定时任务")
         except Exception as e:
-            self.ap.logger.error(f"任务加载失败: {str(e)}")
+            logger.error(f"任务加载失败: {str(e)}")
             self.tasks = []
 
     def _save_tasks(self):
@@ -59,7 +50,7 @@ class ZaskManagerPlugin(BasePlugin):
 
     async def schedule_checker(self):
         """定时任务检查器"""
-        self.ap.logger.info("定时检查器启动")
+        logger.info("定时检查器启动")
         while True:
             await asyncio.sleep(30 - datetime.now().second % 30)
             now = datetime.now(china_tz)
@@ -73,7 +64,7 @@ class ZaskManagerPlugin(BasePlugin):
                         task["last_run"] = now.isoformat()
                         self._save_tasks()
                     except Exception as e:
-                        self.ap.logger.error(f"任务执行失败: {str(e)}")
+                        logger.error(f"任务执行失败: {str(e)}")
 
     def _should_trigger(self, task: Dict, now: datetime) -> bool:
         """判断是否应该触发任务"""
@@ -83,14 +74,19 @@ class ZaskManagerPlugin(BasePlugin):
     async def _send_task_result(self, task: Dict, message: str):
         """发送任务结果"""
         try:
-            await self.host.send_active_message(
-                adapter=self.host.get_platform_adapters()[0],
-                target_type=task["target_type"],
-                target_id=task["target_id"],
-                message=MessageChain([Plain(message[:2000])])
-            )
+            chain = [Plain(message[:2000])]
+            if task["target_type"] == "group":
+                await self.context.send_message(
+                    unified_msg_origin=f"group_{task['target_id']}",
+                    chain=chain
+                )
+            else:
+                await self.context.send_message(
+                    unified_msg_origin=f"private_{task['target_id']}",
+                    chain=chain
+                )
         except Exception as e:
-            self.ap.logger.error(f"消息发送失败: {str(e)}")
+            logger.error(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行脚本文件"""
@@ -117,57 +113,48 @@ class ZaskManagerPlugin(BasePlugin):
         except Exception as e:
             raise RuntimeError(f"未知错误: {str(e)}")
 
-    @handler(GroupMessageReceived)
-    @handler(PersonMessageReceived)
-    async def message_handler(self, ctx: EventContext):
-        """消息处理器"""
+    @filter.command("定时")
+    async def schedule_command(self, event: AstrMessageEvent):
+        """处理定时命令"""
         try:
-            query = getattr(ctx.event, 'query', ctx.event)
-            msg = str(query.message_chain).strip()
-            
-            if not (msg.startswith('/定时') or msg.startswith('/执行')):
-                return
+            parts = event.message_str.split(maxsplit=3)
+            if len(parts) < 2:
+                raise ValueError("命令格式错误，请输入'/定时 帮助'查看用法")
+
+            if parts[1] == "添加":
+                if len(parts) != 4:
+                    raise ValueError("格式应为：/定时 添加 [脚本名] [时间]")
+                await self._add_task(event, parts[2], parts[3])
                 
-            parts = msg.split(maxsplit=3)
-            
-            if parts[0] == "/定时":
-                await self._handle_schedule_command(ctx, parts)
-            elif parts[0] == "/执行":
-                await self._handle_execute_command(ctx, parts)
+            elif parts[1] == "删除":
+                if len(parts) != 3:
+                    raise ValueError("格式应为：/定时 删除 [任务ID或名称]")
+                await self._delete_task(event, parts[2])
                 
-            ctx.prevent_default()
+            elif parts[1] == "列出":
+                await self._list_tasks(event)
+                
+            else:
+                await self._show_help(event)
 
         except Exception as e:
-            await ctx.reply(MessageChain([Plain(f"❌ 错误: {str(e)}")]))
-            ctx.prevent_default()
+            yield event.plain_result(f"❌ 错误: {str(e)}")
 
-    async def _handle_schedule_command(self, ctx: EventContext, parts: List[str]):
-        """处理定时命令"""
-        if len(parts) < 2:
-            raise ValueError("命令格式错误，请输入'/定时 帮助'查看用法")
-            
-        if parts[1] == "添加":
-            if len(parts) != 4:
-                raise ValueError("格式应为：/定时 添加 [脚本名] [时间]")
-            await self._add_task(ctx, parts[2], parts[3])
-        elif parts[1] == "删除":
-            if len(parts) != 3:
-                raise ValueError("格式应为：/定时 删除 [任务ID或名称]")
-            await self._delete_task(ctx, parts[2])
-        elif parts[1] == "列出":
-            await self._list_tasks(ctx)
-        else:
-            await self._show_help(ctx)
-
-    async def _handle_execute_command(self, ctx: EventContext, parts: List[str]):
+    @filter.command("执行")
+    async def execute_command(self, event: AstrMessageEvent):
         """处理立即执行命令"""
-        if len(parts) < 2:
-            raise ValueError("格式应为：/执行 [脚本名]")
+        try:
+            parts = event.message_str.split(maxsplit=1)
+            if len(parts) < 2:
+                raise ValueError("格式应为：/执行 [脚本名]")
+                
+            output = await self._execute_script(parts[1])
+            yield event.plain_result(f"✅ 执行成功\n{output[:1500]}")
             
-        output = await self._execute_script(parts[1])
-        await ctx.reply(MessageChain([Plain(f"✅ 执行成功\n{output[:1500]}")]))
+        except Exception as e:
+            yield event.plain_result(f"❌ 错误: {str(e)}")
 
-    async def _add_task(self, ctx: EventContext, name: str, time_str: str):
+    async def _add_task(self, event: AstrMessageEvent, name: str, time_str: str):
         """添加定时任务"""
         if not name or not time_str:
             raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
@@ -175,15 +162,9 @@ class ZaskManagerPlugin(BasePlugin):
         if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
             raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
-        # 获取会话类型（兼容处理）
-        launcher_type = str(getattr(ctx.event, 'launcher_type', ''))
-        # 显示名称映射
-        type_mapping = {
-            "group": "群聊",
-            "private": "私聊",
-            "temp": "临时会话"
-        }
-        launcher_type_name = type_mapping.get(launcher_type, launcher_type)
+        # 获取会话信息
+        target_type = "group" if event.group_id else "private"
+        target_id = event.group_id or event.get_sender_id()
 
         # 脚本存在性检查
         script_path = os.path.join(self.data_dir, f"{name}.py")
@@ -195,8 +176,8 @@ class ZaskManagerPlugin(BasePlugin):
         new_task = {
             "script_name": name,
             "time": time_str,
-            "target_type": launcher_type,
-            "target_id": str(ctx.event.launcher_id),
+            "target_type": target_type,
+            "target_id": target_id,
             "last_run": None,
             "created": datetime.now(china_tz).isoformat()
         }
@@ -213,22 +194,24 @@ class ZaskManagerPlugin(BasePlugin):
             "✅ 定时任务创建成功\n"
             f"名称：{name}\n"
             f"时间：每日 {time_str}\n"
-            f"绑定到：{launcher_type_name}\n"
+            f"绑定到：{'群聊' if target_type == 'group' else '私聊'}\n"
             f"任务ID：{new_task['task_id']}"
         )
-        await ctx.reply(MessageChain([Plain(reply_msg)])) 
+        yield event.plain_result(reply_msg)
 
-    async def _delete_task(self, ctx: EventContext, identifier: str):
+    async def _delete_task(self, event: AstrMessageEvent, identifier: str):
         """删除当前会话的任务"""
-        current_launcher_type = str(getattr(ctx.event, 'launcher_type', ''))
+        target_type = "group" if event.group_id else "private"
+        target_id = event.group_id or event.get_sender_id()
+        
         current_tasks = [
             t for t in self.tasks 
-            if t["target_type"] == current_launcher_type
-            and t["target_id"] == str(ctx.event.launcher_id)
+            if t["target_type"] == target_type
+            and t["target_id"] == target_id
         ]
         
         if not current_tasks:
-            await ctx.reply(MessageChain([Plain("当前会话没有定时任务")]))
+            yield event.plain_result("当前会话没有定时任务")
             return
             
         deleted = []
@@ -250,25 +233,27 @@ class ZaskManagerPlugin(BasePlugin):
                 f"  任务ID：{task['task_id']}\n"
                 "━━━━━━━━━━━━━━━━"
             )
-        await ctx.reply(MessageChain([Plain("\n".join(report))]))
+        yield event.plain_result("\n".join(report))
 
-    async def _list_tasks(self, ctx: EventContext):
+    async def _list_tasks(self, event: AstrMessageEvent):
         """列出当前会话任务"""
-        current_launcher_type = str(getattr(ctx.event, 'launcher_type', ''))
+        target_type = "group" if event.group_id else "private"
+        target_id = event.group_id or event.get_sender_id()
+        
         current_tasks = [
             t for t in self.tasks 
-            if t["target_type"] == current_launcher_type
-            and t["target_id"] == str(ctx.event.launcher_id)
+            if t["target_type"] == target_type
+            and t["target_id"] == target_id
         ]
         
         if not current_tasks:
-            await ctx.reply(MessageChain([Plain("当前会话没有定时任务")]))
+            yield event.plain_result("当前会话没有定时任务")
             return
             
         task_list = [
             "📅 当前会话定时任务列表",
-            f"会话类型：{current_launcher_type}",
-            f"会话ID：{ctx.event.launcher_id}",
+            f"会话类型：{'群聊' if target_type == 'group' else '私聊'}",
+            f"会话ID：{target_id}",
             "━━━━━━━━━━━━━━━━"
         ]
         
@@ -286,9 +271,9 @@ class ZaskManagerPlugin(BasePlugin):
                 "━━━━━━━━━━━━━━━━"
             ])
             
-        await ctx.reply(MessageChain([Plain("\n".join(task_list))]))
+        yield event.plain_result("\n".join(task_list))
 
-    async def _show_help(self, ctx: EventContext):
+    async def _show_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
         help_msg = """
 📘 定时任务插件使用指南
@@ -307,9 +292,9 @@ class ZaskManagerPlugin(BasePlugin):
 
 🛑 注意：任务ID可在添加成功时获得
         """.strip()
-        await ctx.reply(MessageChain([Plain(help_msg)]))
+        yield event.plain_result(help_msg)
 
-    def __del__(self):
-        """清理资源"""
-        if hasattr(self, "check_task"):
-            self.check_task.cancel()
+    async def terminate(self):
+        """插件卸载时停止所有任务"""
+        if hasattr(self, "schedule_checker_task"):
+            self.schedule_checker_task.cancel()
