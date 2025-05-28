@@ -19,11 +19,11 @@ def generate_task_id(task: Dict) -> str:
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
-    def __init__(self, context: Context, config: dict):  # ✅ 添加 config 参数
+    def __init__(self, context: Context, config: dict = None):  # ✅ 添加默认值
         super().__init__(context)
-        self.config = config  # ✅ 加载配置
+        self.config = config or {}  # ✅ 处理空配置
         
-        # 标准化路径配置
+        # 路径配置
         self.plugin_root = os.path.abspath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -32,9 +32,7 @@ class ZaskManager(Star):
                 "ZaskManager"
             )
         )
-        self.tasks_file = os.path.join(self.plugin_root, "tasks.json")
-        os.makedirs(self.plugin_root, exist_ok=True)
-        logger.debug(f"插件数据目录初始化完成: {self.plugin_root}")
+        logger.debug(f"插件配置已加载: {self.config}")
 
         self.tasks: List[Dict] = []
         self._load_tasks()
