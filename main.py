@@ -17,7 +17,7 @@ def generate_task_id(task: Dict) -> str:
     """生成唯一任务标识"""
     return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['target_type'][0]}_{task['target_id']}"
 
-@register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/yourrepo")
+@register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
     def __init__(self, context: Context):
         super().__init__(context)
