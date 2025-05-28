@@ -1,0 +1,7 @@
+{
+  "example_config": {
+    "description": "示例配置项",
+    "type": "string",
+    "default": "default_value"
+  }
+}
