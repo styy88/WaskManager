@@ -183,8 +183,9 @@ class ZaskManager(Star):
             raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
         # 获取会话信息
-        target_type = "group" if event.group_id else "private"
-        target_id = event.group_id or event.get_sender_id()
+        group_id = event.get_group_id()  # ✅ 使用标准API
+        target_type = "group" if group_id else "private"
+        target_id = group_id if group_id else event.get_sender_id()
 
         # 脚本存在性检查（修复变量名）
         script_path = os.path.join(self.plugin_root, f"{name}.py")  # ✅ 使用 plugin_root
@@ -221,8 +222,9 @@ class ZaskManager(Star):
 
     async def _delete_task(self, event: AstrMessageEvent, identifier: str):
         """删除当前会话的任务"""
-        target_type = "group" if event.group_id else "private"
-        target_id = event.group_id or event.get_sender_id()
+        group_id = event.get_group_id()
+        target_type = "group" if group_id else "private"
+        target_id = group_id if group_id else event.get_sender_id()
         
         current_tasks = [
             t for t in self.tasks 
@@ -257,8 +259,9 @@ class ZaskManager(Star):
 
     async def _list_tasks(self, event: AstrMessageEvent):
         """列出当前会话任务"""
-        target_type = "group" if event.group_id else "private"
-        target_id = event.group_id or event.get_sender_id()
+        group_id = event.get_group_id()
+        target_type = "group" if group_id else "private"
+        target_id = group_id if group_id else event.get_sender_id()
         
         current_tasks = [
             t for t in self.tasks 
