@@ -22,11 +22,24 @@ class ZaskManager(Star):
     def __init__(self, context: Context):
         super().__init__(context)
         self.tasks: List[Dict] = []
-        self.data_dir = os.path.join(context.data_dir, "ZaskManager")  # 使用标准data目录
-        self.tasks_file = os.path.join(self.data_dir, "tasks.json")
-        os.makedirs(self.data_dir, exist_ok=True)
+        
+        # 根据项目结构配置路径
+        self.plugin_root = os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__),  # plugins/zaskmanager/
+                "..", "..",  # 上两级到 /AstrBot
+                "plugin_data",
+                "ZaskManager"
+            )
+        )
+        self.tasks_file = os.path.join(self.plugin_root, "tasks.json")
+        
+        # 确保目录存在
+        os.makedirs(self.plugin_root, exist_ok=True)
+        logger.info(f"插件数据目录: {self.plugin_root}")
+
         self._load_tasks()
-        asyncio.create_task(self.schedule_checker())
+        self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
     def _load_tasks(self):
         """安全加载任务数据"""
