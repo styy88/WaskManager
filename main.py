@@ -136,31 +136,35 @@ class ZaskManager(Star):
             raise RuntimeError(f"未知错误: {str(e)}")
 
     @filter.command("定时")
-    async def schedule_command(self, event: AstrMessageEvent):
-        """处理定时命令"""
-        try:
-            parts = event.message_str.split(maxsplit=3)
-            if len(parts) < 2:
-                raise ValueError("命令格式错误，请输入'/定时 帮助'查看用法")
+async def schedule_command(self, event: AstrMessageEvent):
+    """处理定时命令（修复异步生成器调用）"""
+    try:
+        parts = event.message_str.split(maxsplit=3)
+        if len(parts) < 2:
+            raise ValueError("命令格式错误，请输入'/定时 帮助'查看用法")
 
-            if parts[1] == "添加":
-                if len(parts) != 4:
-                    raise ValueError("格式应为：/定时 添加 [脚本名] [时间]")
-                await self._add_task(event, parts[2], parts[3])
-                
-            elif parts[1] == "删除":
-                if len(parts) != 3:
-                    raise ValueError("格式应为：/定时 删除 [任务ID或名称]")
-                await self._delete_task(event, parts[2])
-                
-            elif parts[1] == "列出":
-                await self._list_tasks(event)
-                
-            else:
-                await self._show_help(event)
+        if parts[1] == "添加":
+            if len(parts) != 4:
+                raise ValueError("格式应为：/定时 添加 [脚本名] [时间]")
+            async for msg in self._add_task(event, parts[2], parts[3]):
+                    yield msg
+                    
+        elif parts[1] == "删除":
+            if len(parts) != 3:
+                raise ValueError("格式应为：/定时 删除 [任务ID或名称]")
+            async for msg in self._delete_task(event, parts[2]):
+                    yield msg
+                    
+        elif parts[1] == "列出":
+            async for msg in self._list_tasks(event):
+                    yield msg
+                    
+        else:
+            async for msg in self._show_help(event):
+                    yield msg
 
-        except Exception as e:
-            yield event.plain_result(f"❌ 错误: {str(e)}")
+    except Exception as e:
+        yield event.plain_result(f"❌ 错误: {str(e)}")
 
     @filter.command("执行")
     async def execute_command(self, event: AstrMessageEvent):
