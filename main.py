@@ -1,7 +1,7 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api.message_components import Plain, Image  # 消息组件
+from astrbot.api.message_components import Plain, Image
 import os
 import re
 import json
@@ -19,25 +19,24 @@ def generate_task_id(task: Dict) -> str:
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: dict):  # ✅ 添加 config 参数
         super().__init__(context)
-        self.tasks: List[Dict] = []
+        self.config = config  # ✅ 加载配置
         
-        # 根据项目结构配置路径
+        # 标准化路径配置
         self.plugin_root = os.path.abspath(
             os.path.join(
-                os.path.dirname(__file__),  # plugins/zaskmanager/
-                "..", "..",  # 上两级到 /AstrBot
+                os.path.dirname(__file__),
+                "..", "..",
                 "plugin_data",
                 "ZaskManager"
             )
         )
         self.tasks_file = os.path.join(self.plugin_root, "tasks.json")
-        
-        # 确保目录存在
         os.makedirs(self.plugin_root, exist_ok=True)
-        logger.info(f"插件数据目录: {self.plugin_root}")
+        logger.debug(f"插件数据目录初始化完成: {self.plugin_root}")
 
+        self.tasks: List[Dict] = []
         self._load_tasks()
         self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
@@ -102,11 +101,15 @@ class ZaskManager(Star):
             logger.error(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
-        """执行脚本文件"""
-        script_path = os.path.join(self.data_dir, f"{script_name}.py")
+        """执行脚本文件（修复路径）"""
+        script_path = os.path.join(self.plugin_root, f"{script_name}.py")  # ✅ 使用正确的根目录
         
         if not os.path.exists(script_path):
-            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.data_dir))
+            available = ", ".join(
+                f.replace('.py', '') 
+                for f in os.listdir(self.plugin_root)  # ✅ 使用 plugin_root
+                if f.endswith('.py')
+            )
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
         try:
