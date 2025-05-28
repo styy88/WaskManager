@@ -39,19 +39,25 @@ class ZaskManager(Star):
         self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
     def _load_tasks(self):
-        """安全加载任务数据"""
-        try:
-            if os.path.exists(self.tasks_file):
-                with open(self.tasks_file, "r", encoding="utf-8") as f:
-                    raw_tasks = json.load(f)
-                    self.tasks = [
-                        {**task, "task_id": task.get("task_id") or generate_task_id(task)}
-                        for task in raw_tasks
-                    ]
-                logger.info(f"成功加载 {len(self.tasks)} 个定时任务")
-        except Exception as e:
-            logger.error(f"任务加载失败: {str(e)}")
-            self.tasks = []
+    """安全加载任务数据"""
+    try:
+        # 确保目录存在
+        if not os.path.exists(self.plugin_root):
+            os.makedirs(self.plugin_root, exist_ok=True)
+            logger.warning(f"检测到目录缺失，已重新创建: {self.plugin_root}")
+            
+        # 加载任务文件
+        if os.path.exists(self.tasks_file):
+            with open(self.tasks_file, "r", encoding="utf-8") as f:
+                raw_tasks = json.load(f)
+                self.tasks = [
+                    {**task, "task_id": task.get("task_id") or generate_task_id(task)}
+                    for task in raw_tasks
+                ]
+            logger.info(f"成功加载 {len(self.tasks)} 个定时任务")
+    except Exception as e:
+        logger.error(f"任务加载失败: {str(e)}")
+        self.tasks = []
 
     def _save_tasks(self):
         """安全保存任务数据"""
