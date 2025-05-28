@@ -23,7 +23,7 @@ class ZaskManager(Star):
         super().__init__(context)
         self.config = config or {}
         
-        # 路径配置（已修复）
+        # 路径配置
         self.plugin_root = os.path.abspath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -40,15 +40,13 @@ class ZaskManager(Star):
         self._load_tasks()
         self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
-    def _load_tasks(self):  # ✅ 修复缩进
+    def _load_tasks(self):
         """安全加载任务数据"""
         try:
-            # 确保目录存在
             if not os.path.exists(self.plugin_root):
                 os.makedirs(self.plugin_root, exist_ok=True)
                 logger.warning(f"检测到目录缺失，已重新创建: {self.plugin_root}")
-                
-            # 加载任务文件
+            
             if os.path.exists(self.tasks_file):
                 with open(self.tasks_file, "r", encoding="utf-8") as f:
                     raw_tasks = json.load(f)
@@ -107,15 +105,11 @@ class ZaskManager(Star):
             logger.error(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
-        """执行脚本文件（修复变量名）"""
-        script_path = os.path.join(self.plugin_root, f"{script_name}.py")  # ✅ 使用正确的 plugin_root
+        """执行脚本文件"""
+        script_path = os.path.join(self.plugin_root, f"{script_name}.py")
         
         if not os.path.exists(script_path):
-            available = ", ".join(
-                f.replace('.py', '') 
-                for f in os.listdir(self.plugin_root)
-                if f.endswith('.py')
-            )
+            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root) if f.endswith('.py'))
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
         try:
@@ -136,35 +130,35 @@ class ZaskManager(Star):
             raise RuntimeError(f"未知错误: {str(e)}")
 
     @filter.command("定时")
-async def schedule_command(self, event: AstrMessageEvent):
-    """处理定时命令（修复异步生成器调用）"""
-    try:
-        parts = event.message_str.split(maxsplit=3)
-        if len(parts) < 2:
-            raise ValueError("命令格式错误，请输入'/定时 帮助'查看用法")
+    async def schedule_command(self, event: AstrMessageEvent):  # 修复前这里缩进错误
+        """处理定时命令"""
+        try:
+            parts = event.message_str.split(maxsplit=3)
+            if len(parts) < 2:
+                raise ValueError("命令格式错误，请输入'/定时 帮助'查看用法")
 
-        if parts[1] == "添加":
-            if len(parts) != 4:
-                raise ValueError("格式应为：/定时 添加 [脚本名] [时间]")
-            async for msg in self._add_task(event, parts[2], parts[3]):
+            if parts[1] == "添加":
+                if len(parts) != 4:
+                    raise ValueError("格式应为：/定时 添加 [脚本名] [时间]")
+                async for msg in self._add_task(event, parts[2], parts[3]):
                     yield msg
                     
-        elif parts[1] == "删除":
-            if len(parts) != 3:
-                raise ValueError("格式应为：/定时 删除 [任务ID或名称]")
-            async for msg in self._delete_task(event, parts[2]):
+            elif parts[1] == "删除":
+                if len(parts) != 3:
+                    raise ValueError("格式应为：/定时 删除 [任务ID或名称]")
+                async for msg in self._delete_task(event, parts[2]):
                     yield msg
                     
-        elif parts[1] == "列出":
-            async for msg in self._list_tasks(event):
+            elif parts[1] == "列出":
+                async for msg in self._list_tasks(event):
                     yield msg
                     
-        else:
-            async for msg in self._show_help(event):
+            else:
+                async for msg in self._show_help(event):
                     yield msg
 
-    except Exception as e:
-        yield event.plain_result(f"❌ 错误: {str(e)}")
+        except Exception as e:
+            yield event.plain_result(f"❌ 错误: {str(e)}")
 
     @filter.command("执行")
     async def execute_command(self, event: AstrMessageEvent):
