@@ -1,7 +1,8 @@
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image
+from astrbot.api.platform import MessageType
 from astrbot.core.utils.io import download_image_by_url
 import os
 import re
@@ -9,226 +10,251 @@ import json
 import asyncio
 import subprocess
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict
+from typing import List, Dict, Union
 
-# ---------- 核心修复：消息发送机制 ----------
+# 创建UTC+8时区
 china_tz = timezone(timedelta(hours=8))
+
+def generate_task_id(task: Dict) -> str:
+    """生成唯一任务标识"""
+    return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['receiver_type'][0]}_{task['receiver']}"
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
         self.context = context
-        self._init_paths()
-        self.tasks = self._safe_load_tasks()
-        self.schedule_checker_task = asyncio.create_task(self._schedule_loop())
-
-    # ---------- 消息发送统一接口 ----------
-    async def _send_message(self, task: Dict, components: list) -> bool:
-        """统一消息发送接口（适配v4.3.1+）"""
-        try:
-            # 构造标准会话ID
-            session_id = f"{task['platform']}:{task['receiver_type']}:{task['origin_id'].split('!')[-1]}"
-            
-            # 处理图片下载
-            processed = []
-            for comp in components:
-                if isinstance(comp, Image) and comp.file.startswith("http"):
-                    local_path = await download_image_by_url(comp.file)
-                    processed.append(Image(file=f"file:///{local_path}"))
-                else:
-                    processed.append(comp)
-            
-            # 使用框架标准接口
-            await self.context.send_message(
-                session_id=session_id,
-                message_chain=processed
-            )
-            return True
-        except Exception as e:
-            logger.error(f"消息发送失败: {str(e)}")
-            return False
-
-    # ---------- 定时任务核心逻辑 ----------
-    async def _schedule_loop(self):
-        """稳健的定时循环逻辑"""
-        logger.info("定时服务启动")
-        while True:
-            try:
-                now = datetime.now(china_tz)
-                next_check = (30 - (now.second % 30)) % 30
-                await asyncio.sleep(next_check)
-                
-                current_time = datetime.now(china_tz).strftime("%H:%M")
-                logger.debug(f"定时检查: {current_time}")
-                
-                for task in self.tasks.copy():
-                    if task["time"] == current_time and self._should_trigger(task):
-                        logger.info(f"执行任务: {task['task_id']}")
-                        await self._execute_and_notify(task)
-                        
-            except asyncio.CancelledError:
-                logger.info("定时服务终止")
-                break
-            except Exception as e:
-                logger.error(f"定时循环异常: {str(e)}")
-                await asyncio.sleep(10)
-
-    async def _execute_and_notify(self, task: Dict):
-        """带重试的任务执行逻辑"""
-        max_retries = 2
-        for attempt in range(1, max_retries+1):
-            try:
-                output = await self._run_script(task["script_name"])
-                success = await self._send_message(task, [Plain(text=output[:2000])])
-                if success:
-                    task["last_run"] = datetime.now(china_tz).isoformat()
-                    self._save_tasks()
-                    break
-                else:
-                    logger.warning(f"消息发送失败，重试 {attempt}/{max_retries}")
-            except Exception as e:
-                error_msg = f"尝试 {attempt} 失败: {str(e)}"
-                logger.error(error_msg)
-                if attempt == max_retries:
-                    await self._send_message(task, [Plain(text=f"❌ 任务最终失败: {error_msg[:500]}")])
-
-    # ---------- 数据持久化 ----------
-    def _safe_load_tasks(self) -> List[Dict]:
-        """带数据迁移的加载逻辑"""
-        try:
-            if not os.path.exists(self.tasks_file):
-                return []
-                
-            with open(self.tasks_file, 'r', encoding='utf-8') as f:
-                tasks = json.load(f)
-                
-            # 数据格式迁移
-            migrated = []
-            for t in tasks:
-                if 'origin_id' not in t:
-                    t['origin_id'] = f"{t.get('platform','unknown')}!{t['receiver_type']}!{t.get('receiver','')}"
-                migrated.append(t)
-                
-            return [t for t in migrated if self._validate_task(t)]
-            
-        except Exception as e:
-            logger.error(f"任务加载失败: {str(e)}")
-            return []
-
-    def _save_tasks(self):
-        """原子化保存"""
-        try:
-            tmp_file = self.tasks_file + '.tmp'
-            with open(tmp_file, 'w', encoding='utf-8') as f:
-                json.dump(self.tasks, f, indent=2, ensure_ascii=False)
-            os.replace(tmp_file, self.tasks_file)
-        except Exception as e:
-            logger.error(f"任务保存失败: {str(e)}")
-
-    # ---------- 命令处理 ----------
-    @filter.command("定时")
-    async def handle_command(self, event: AstrMessageEvent):
-        """命令路由"""
-        try:
-            parts = event.message_str.strip().split()
-            if len(parts) < 2:
-                return await self._show_help(event)
-
-            cmd = parts[1].lower()
-            if cmd == '添加' and len(parts) >=4:
-                await self._add_task(event, parts[2], parts[3])
-            elif cmd == '删除' and len(parts)>=3:
-                await self._delete_task(event, parts[2])
-            elif cmd == '列出':
-                await self._list_tasks(event)
-            else:
-                await self._show_help(event)
-                
-        except Exception as e:
-            await event.reply(f"❌ 命令处理失败: {str(e)}")
-
-    # ---------- 辅助方法 ----------
-    def _init_paths(self):
-        """路径初始化"""
+        self.config = config or {}
+        
+        # 路径配置
         self.plugin_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "..", "plugin_data", "ZaskManager")
+            os.path.join(
+                os.path.dirname(__file__),
+                "..", "..",
+                "plugin_data",
+                "ZaskManager"
+            )
         )
         self.tasks_file = os.path.join(self.plugin_root, "tasks.json")
         os.makedirs(self.plugin_root, exist_ok=True)
+        logger.info(f"插件数据目录初始化完成: {self.plugin_root}")
+
+        self.tasks: List[Dict] = []
+        self._load_tasks()
+        self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
+
+    def _load_tasks(self):
+        """安全加载任务数据"""
+        try:
+            if os.path.exists(self.tasks_file):
+                with open(self.tasks_file, "r", encoding="utf-8") as f:
+                    raw_tasks = json.load(f)
+                    self.tasks = [
+                        {**task, "task_id": task.get("task_id") or generate_task_id(task)}
+                        for task in raw_tasks
+                        if self._validate_task(task)
+                    ]
+                logger.info(f"成功加载 {len(self.tasks)} 个有效定时任务")
+        except Exception as e:
+            logger.error(f"任务加载失败: {str(e)}")
+            self.tasks = []
 
     def _validate_task(self, task: Dict) -> bool:
-        """数据校验"""
-        return all(key in task for key in ['script_name', 'time', 'origin_id', 'platform'])
+        """验证任务数据有效性"""
+        required_keys = ["script_name", "time", "receiver_type", "receiver", "platform"]
+        return all(key in task for key in required_keys)
 
-    def _should_trigger(self, task: Dict) -> bool:
-        """触发条件检查"""
-        last_run = datetime.fromisoformat(task['last_run']).astimezone(china_tz) if task.get('last_run') else None
-        return not last_run or (datetime.now(china_tz) - last_run).days >=1
+    def _save_tasks(self):
+        """安全保存任务数据"""
+        valid_tasks = [task for task in self.tasks if self._validate_task(task)]
+        with open(self.tasks_file, "w", encoding="utf-8") as f:
+            json.dump(valid_tasks, f, indent=2, ensure_ascii=False)
 
-    async def _run_script(self, name: str) -> str:
-        """安全的脚本执行"""
-        path = os.path.join(self.plugin_root, f"{name}.py")
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"脚本 {name} 不存在")
+    async def schedule_checker(self):
+        """定时任务检查器"""
+        logger.info("定时检查器启动")
+        while True:
+            try:
+                await asyncio.sleep(30 - datetime.now().second % 30)
+                now = datetime.now(china_tz)
+                current_time = now.strftime("%H:%M")
+                
+                for task in self.tasks.copy():
+                    if task["time"] == current_time and self._should_trigger(task, now):
+                        await self._process_task(task, now)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"定时检查器错误: {str(e)}")
+                await asyncio.sleep(10)
+
+    def _should_trigger(self, task: Dict, now: datetime) -> bool:
+        """判断是否应该触发任务"""
+        last_run = datetime.fromisoformat(task["last_run"]).astimezone(china_tz) if task.get("last_run") else None
+        return not last_run or (now - last_run).total_seconds() >= 86400
+
+    async def _process_task(self, task: Dict, now: datetime):
+        """任务处理流程"""
+        try:
+            output = await self._execute_script(task["script_name"])
+            await self._send_task_result(task, output)
+            task["last_run"] = now.isoformat()
+            self._save_tasks()
+        except Exception as e:
+            logger.error(f"任务执行失败: {str(e)}")
+            await self._send_error_notice(task, str(e))
+
+    async def _send_error_notice(self, task: Dict, error_msg: str):
+        """错误通知处理"""
+        await self._send_message(task, [Plain(text=f"❌ 任务执行失败: {error_msg[:500]}")])
+
+    async def _send_task_result(self, task: Dict, message: str):
+        """发送任务结果"""
+        try:
+            await self._send_message(task, [Plain(text=message[:2000])])
+        except Exception as e:
+            logger.error(f"消息发送失败: {str(e)}")
+            raise
+
+    async def _send_message(self, task: Dict, components: list):
+        """消息发送"""
+        try:
+            # 构造目标会话信息
+            session_id = (
+                f"{task['platform'].lower()}:"
+                f"{'GroupMessage' if task['receiver_type'] == 'group' else 'FriendMessage'}:"
+                f"{task['receiver_origin']}"
+            )
             
-        proc = await asyncio.create_subprocess_exec(
-            'python', path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+            # 处理消息组件
+            message_chain = []
+            for comp in components:
+                if isinstance(comp, Image):
+                    if comp.file.startswith("http"):
+                        local_path = await download_image_by_url(comp.file)
+                        message_chain.append(Image(file=f"file:///{local_path}"))
+                    else:
+                        message_chain.append(comp)
+                else:
+                    message_chain.append(comp)
+
+            # 发送
+            await self.context.send_event_result(
+                session_id=session_id,
+                result=MessageEventResult(message_chain)
+            )
+            logger.debug(f"消息已发送至 {session_id}")
+
+        except Exception as e:
+            logger.error(f"消息发送失败: {str(e)}", exc_info=True)
+            raise RuntimeError(f"消息发送失败: {str(e)}")
+
+    async def _execute_script(self, script_name: str) -> str:
+        """执行脚本文件（增加安全性）"""
+        script_path = os.path.join(self.plugin_root, f"{script_name}.py")
         
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(f"执行失败({proc.returncode}): {stderr.decode()}")
-            
-        return stdout.decode('utf-8')
+        if not os.path.exists(script_path):
+            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root) if f.endswith('.py'))
+            raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
-    # ---------- 业务逻辑 ----------
-    async def _add_task(self, event: AstrMessageEvent, name: str, time: str):
-        """添加任务（带完整校验）"""
-        # 时间格式校验
-        if not re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", time):
-            raise ValueError("时间格式应为HH:MM")
+        try:
+            result = await asyncio.wait_for(
+                asyncio.create_subprocess_exec(
+                    "python", script_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                ),
+                timeout=30
+            )
+            stdout, stderr = await result.communicate()
             
-        # 脚本存在性检查
-        if not os.path.exists(os.path.join(self.plugin_root, f"{name}.py")):
-            available = [f[:-3] for f in os.listdir(self.plugin_root) if f.endswith('.py')]
-            raise FileNotFoundError(f"可用脚本: {', '.join(available) or '无'}")
-            
-        # 构造任务数据
+            if result.returncode != 0:
+                raise RuntimeError(f"执行失败（代码{result.returncode}）: {stderr.decode('utf-8')}")
+                
+            return stdout.decode("utf-8")
+        except asyncio.TimeoutError:
+            raise TimeoutError("执行超时（30秒限制）")
+        except Exception as e:
+            raise RuntimeError(f"执行错误: {str(e)}")
+
+    @filter.command("定时")
+    async def schedule_command(self, event: AstrMessageEvent):
+        """处理定时命令"""
+        try:
+            parts = event.message_str.split(maxsplit=3)
+            if len(parts) < 2:
+                raise ValueError("命令格式错误，请输入'/定时 帮助'查看用法")
+
+            command = parts[1].lower()
+            if command == "添加":
+                async for msg in self._add_task(event, parts[2], parts[3]):
+                    yield msg
+            elif command == "删除":
+                async for msg in self._delete_task(event, parts[2]):
+                    yield msg
+            elif command == "列出":
+                async for msg in self._list_tasks(event):
+                    yield msg
+            else:
+                async for msg in self._show_help(event):
+                    yield msg
+
+        except Exception as e:
+            event.stop_event()
+            yield event.plain_result(f"❌ 错误: {str(e)}")
+
+    async def _add_task(self, event: AstrMessageEvent, name: str, time_str: str):
+        """添加定时任务"""
+        if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
+            raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
+
+        group_id = event.get_group_id()
+        user_id = event.get_sender_id()
+        platform = event.get_platform_name().upper()
+
+        script_path = os.path.join(self.plugin_root, f"{name}.py")
+        if not os.path.exists(script_path):
+            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root))
+            raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
+
         new_task = {
             "script_name": name,
-            "time": time,
-            "origin_id": event.unified_msg_origin,
+            "time": time_str,
+            "receiver_type": "group" if group_id else "private",
+            "receiver_origin": event.unified_msg_origin,
             "platform": event.get_platform_name().lower(),
-            "receiver_type": "group" if event.get_group_id() else "private",
             "last_run": None,
-            "created": datetime.now(china_tz).isoformat(),
-            "task_id": f"{name}_{time.replace(':','')}_{hash(event.unified_msg_origin)}"
+            "created": datetime.now(china_tz).isoformat()
         }
+        new_task["task_id"] = generate_task_id(new_task)
         
-        # 重复性检查
-        if any(t['task_id'] == new_task['task_id'] for t in self.tasks):
-            raise ValueError(f"任务已存在: {new_task['task_id']}")
+        if any(t["task_id"] == new_task["task_id"] for t in self.tasks):
+            raise ValueError(f"该时段任务已存在（ID: {new_task['task_id']}）")
             
         self.tasks.append(new_task)
         self._save_tasks()
-        await event.reply(
-            f"✅ 任务创建成功\n"
-            f"名称: {name}\n"
-            f"时间: 每日 {time}\n"
-            f"ID: {new_task['task_id']}"
+    
+        reply_msg = (
+            "✅ 定时任务创建成功\n"
+            f"名称：{name}\n"
+            f"时间：每日 {time_str}\n"
+            f"绑定到：{'群聊' if new_task['receiver_type'] == 'group' else '私聊'}\n"
+            f"平台：{platform}\n"
+            f"任务ID：{new_task['task_id']}"
         )
+        yield event.plain_result(reply_msg)
 
     async def _delete_task(self, event: AstrMessageEvent, identifier: str):
         """删除当前会话的任务"""
-        current_origin = event.unified_msg_origin
-        platform = event.get_platform_name().lower()
+        group_id = event.get_group_id()
+        receiver_type = "group" if group_id else "private"
+        receiver = group_id if group_id else event.get_sender_id()
+        platform = event.get_platform_name().upper()
         
         current_tasks = [
             t for t in self.tasks 
-            if t["receiver_origin"] == current_origin
+            if t["receiver_type"] == receiver_type
+            and t["receiver"] == receiver
             and t["platform"] == platform
         ]
         
@@ -260,12 +286,15 @@ class ZaskManager(Star):
 
     async def _list_tasks(self, event: AstrMessageEvent):
         """列出当前会话任务"""
-        current_origin = event.unified_msg_origin
-        platform = event.get_platform_name().lower()
+        group_id = event.get_group_id()
+        receiver_type = "group" if group_id else "private"
+        receiver = group_id if group_id else event.get_sender_id()
+        platform = event.get_platform_name().upper()
         
         current_tasks = [
             t for t in self.tasks 
-            if t["receiver_origin"] == current_origin
+            if t["receiver_type"] == receiver_type
+            and t["receiver"] == receiver
             and t["platform"] == platform
         ]
         
@@ -315,13 +344,7 @@ class ZaskManager(Star):
     async def _show_help(self, event: AstrMessageEvent):
         """显示帮助信息"""
         help_msg = """
-📘 定时任务插件使用指南（v3.5+）
-
-【核心功能】
-✅ 跨平台支持：微信/QQ/Telegram
-✅ 群聊 & 私聊消息
-✅ 脚本执行结果自动发送
-
+📘 定时任务插件使用指南
 【命令列表】
 /定时 添加 [脚本名] [时间] - 创建新任务
 /定时 删除 [任务ID或名称] - 删除任务
