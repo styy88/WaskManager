@@ -61,8 +61,15 @@ class ZaskManager(Star):
 
     def _validate_task(self, task: Dict) -> bool:
         """验证任务数据有效性"""
-        required_keys = ["script_name", "time", "receiver_type", "receiver", "platform"]
-        return all(key in task for key in required_keys)
+        required_keys = [
+            "script_name",
+            "time",
+            "receiver_type",
+            "receiver_origin",
+            "platform"
+        ]
+        return all(key in task for key in required_keys) and \
+                 task["platform"].islower()
 
     def _save_tasks(self):
         """安全保存任务数据"""
