@@ -2,7 +2,6 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image
-from astrbot.api.platform import MessageType
 from astrbot.core.utils.io import download_image_by_url
 import os
 import re
@@ -17,7 +16,7 @@ china_tz = timezone(timedelta(hours=8))
 
 def generate_task_id(task: Dict) -> str:
     """生成唯一任务标识"""
-    return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['platform']}_{hash(task['receiver_origin'])}"
+    return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['platform']}_{hash(task['origin_id'])}"
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
@@ -44,7 +43,7 @@ class ZaskManager(Star):
         self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
     def _load_tasks(self):
-        """安全加载任务数据（增加数据迁移）"""
+        """安全加载任务数据（兼容新旧数据）"""
         try:
             if os.path.exists(self.tasks_file):
                 with open(self.tasks_file, "r", encoding="utf-8") as f:
@@ -54,13 +53,12 @@ class ZaskManager(Star):
                     migrated_tasks = []
                     for task in raw_tasks:
                         # 迁移旧版字段
-                        if "receiver" in task and "receiver_origin" not in task:
-                            task["receiver_origin"] = f"{task.get('platform','unknown')}!{task['receiver_type']}!{task['receiver']}"
+                        if "receiver" in task and "origin_id" not in task:
+                            task["origin_id"] = f"{task['platform']}!{task['receiver_type']}!{task['receiver']}"
                         
                         # 确保平台名称小写
-                        if "platform" in task:
-                            task["platform"] = task["platform"].lower()
-                            
+                        task["platform"] = task.get("platform", "").lower()
+                        
                         migrated_tasks.append(task)
                     
                     self.tasks = [
@@ -75,13 +73,7 @@ class ZaskManager(Star):
 
     def _validate_task(self, task: Dict) -> bool:
         """验证任务数据有效性"""
-        required_keys = [
-            "script_name", 
-            "time", 
-            "receiver_type", 
-            "receiver_origin",
-            "platform"
-        ]
+        required_keys = ["script_name", "time", "origin_id", "platform"]
         return all(key in task for key in required_keys)
 
     def _save_tasks(self):
@@ -114,9 +106,9 @@ class ZaskManager(Star):
         return not last_run or (now - last_run).total_seconds() >= 86400
 
     async def _process_task(self, task: Dict, now: datetime):
-        """任务处理流程（增加重试机制）"""
+        """任务处理流程（带重试机制）"""
         max_retries = 2
-        for attempt in range(max_retries+1):
+        for attempt in range(max_retries + 1):
             try:
                 output = await self._execute_script(task["script_name"])
                 await self._send_task_result(task, output)
@@ -145,37 +137,35 @@ class ZaskManager(Star):
     async def _send_message(self, task: Dict, components: list):
         """完全重构的消息发送方法"""
         try:
-            # 解析接收者信息
-            origin_parts = task['receiver_origin'].split('!')
-            platform = task['platform'].lower()
-            receiver_type = task['receiver_type']
-            receiver_id = origin_parts[-1]  # 提取最后一段作为真实ID
+            # 解析会话标识
+            origin_parts = task['origin_id'].split('!')
+            if len(origin_parts) < 3:
+                raise ValueError(f"无效的origin_id格式: {task['origin_id']}")
+            
+            platform = origin_parts[0].lower()
+            receiver_type = origin_parts[1]
+            receiver_id = origin_parts[2]
 
-            # 构造目标字典
-            target = {
-                "platform": platform,
-                "receiver_type": receiver_type,
-                "receiver_id": receiver_id
-            }
-
-            # 处理消息组件
-            message_chain = []
+            # 构造消息事件结果
+            result = MessageEventResult()
             for comp in components:
                 if isinstance(comp, Image):
                     if comp.file.startswith("http"):
                         local_path = await download_image_by_url(comp.file)
-                        message_chain.append(Image(file=f"file:///{local_path}"))
+                        result.append(Image(file=f"file:///{local_path}"))
                     else:
-                        message_chain.append(comp)
+                        result.append(comp)
                 else:
-                    message_chain.append(comp)
+                    result.append(comp)
 
-            # 调用正确的方法
-            await self.context.send_message(
-                target=target,
-                message_chain=message_chain
+            # 通过事件响应机制发送
+            await self.context.send_event_result(
+                platform=platform,
+                receiver_type=receiver_type,
+                receiver=receiver_id,
+                result=result
             )
-            logger.debug(f"消息已发送至 {target}")
+            logger.debug(f"消息已发送至 {platform}/{receiver_type}/{receiver_id}")
 
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}", exc_info=True)
