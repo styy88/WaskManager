@@ -1,8 +1,8 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, MessageChain
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api.message_components import Plain  # 文本消息组件
-from astrbot.api.platform import MessageType     # 消息类型枚举（按需）
+from astrbot.api.message_components import Plain
+from astrbot.api.platform import MessageType
 from datetime import datetime, timedelta, timezone
 import os
 import re
@@ -23,7 +23,7 @@ class ZaskManager(Star):
         super().__init__(context)
         self.config = config or {}
         
-        # 插件数据目录（持久化任务/脚本，遵循 data 目录规范）
+        # 插件数据目录
         self.plugin_root = os.path.abspath(
             os.path.join(
                 os.path.dirname(__file__),
