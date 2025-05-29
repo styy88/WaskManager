@@ -20,15 +20,14 @@ def generate_task_id(task: Dict) -> str:
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
-    def __init__(self, context: Context, config: dict = None, **kwargs):  # 关键修复：使用**kwargs接收额外参数
-        # 正确初始化父类（适配框架API变更）
-        super().__init__(context, config or {})
+    def __init__(self, context: Context):  # 仅保留context参数
+        super().__init__(context)  # 关键修复：父类只接受1个参数
         
         # 成员变量初始化
         self.context = context
-        self.config = config or {}
+        self.config = {}  # 使用空配置
         
-        # 路径配置（完全独立于数据库）
+        # 路径配置（独立存储）
         self.plugin_root = os.path.abspath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -46,57 +45,31 @@ class ZaskManager(Star):
         self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
     def _load_tasks(self):
-        """安全加载任务数据（兼容新旧数据）"""
+        """文件加载逻辑"""
         try:
             if os.path.exists(self.tasks_file):
                 with open(self.tasks_file, "r", encoding="utf-8") as f:
-                    raw_tasks = json.load(f)
-                    
-                    # 数据迁移逻辑
-                    migrated_tasks = []
-                    for task in raw_tasks:
-                        # 迁移旧版字段
-                        if "receiver" in task and "origin_id" not in task:
-                            task["origin_id"] = f"{task.get('platform','unknown')}!{task['receiver_type']}!{task['receiver']}"
-                        
-                        # 确保平台名称小写
-                        task["platform"] = task.get("platform", "").lower()
-                        
-                        migrated_tasks.append(task)
-                    
-                    self.tasks = [
-                        {**task, "task_id": task.get("task_id") or generate_task_id(task)}
-                        for task in migrated_tasks
-                        if self._validate_task(task)
-                    ]
-                logger.info(f"成功加载 {len(self.tasks)} 个有效定时任务")
+                    self.tasks = json.load(f)
+                logger.info(f"成功加载 {len(self.tasks)} 个任务")
         except Exception as e:
             logger.error(f"任务加载失败: {str(e)}")
             self.tasks = []
 
-    def _validate_task(self, task: Dict) -> bool:
-        """验证任务数据有效性"""
-        required_keys = ["script_name", "time", "origin_id", "platform"]
-        return all(key in task for key in required_keys)
-
     def _save_tasks(self):
-        """安全保存任务数据"""
-        valid_tasks = [task for task in self.tasks if self._validate_task(task)]
+        """文件保存逻辑"""
         with open(self.tasks_file, "w", encoding="utf-8") as f:
-            json.dump(valid_tasks, f, indent=2, ensure_ascii=False)
+            json.dump(self.tasks, f, indent=2, ensure_ascii=False)
 
     async def schedule_checker(self):
         """定时任务检查器"""
         logger.info("定时检查器启动")
         while True:
-            try:
-                await asyncio.sleep(30 - datetime.now().second % 30)
-                now = datetime.now(china_tz)
-                current_time = now.strftime("%H:%M")
-                
-                for task in self.tasks.copy():
-                    if task["time"] == current_time and self._should_trigger(task, now):
-                        await self._process_task(task, now)
+            await asyncio.sleep(30)
+            now = datetime.now(china_tz)
+            current_time = now.strftime("%H:%M")
+            for task in self.tasks.copy():
+                if task["time"] == current_time:
+                    await self._process_task(task, now)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -198,8 +171,8 @@ class ZaskManager(Star):
             raise RuntimeError(f"执行错误: {str(e)}")
 
     @filter.command("定时")
-    async def schedule_command(self, event: AstrMessageEvent, context: Context):
-        """处理定时命令（修正参数签名）"""
+    async def schedule_command(self, event: AstrMessageEvent):
+        """命令处理方法（保持参数简洁）"""
         try:
             parts = event.message_str.split(maxsplit=3)
             if len(parts) < 2:
@@ -222,7 +195,6 @@ class ZaskManager(Star):
         except Exception as e:
             event.stop_event()
             yield event.plain_result(f"❌ 错误: {str(e)}")
-
     async def _add_task(self, event: AstrMessageEvent, name: str, time_str: str):
         """添加定时任务（修正字段存储）"""
         if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
