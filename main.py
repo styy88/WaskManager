@@ -54,7 +54,7 @@ class ZaskManager(Star):
                     for task in raw_tasks:
                         # 迁移旧版字段
                         if "receiver" in task and "origin_id" not in task:
-                            task["origin_id"] = f"{task['platform']}!{task['receiver_type']}!{task['receiver']}"
+                            task["origin_id"] = f"{task.get('platform','unknown')}!{task['receiver_type']}!{task['receiver']}"
                         
                         # 确保平台名称小写
                         task["platform"] = task.get("platform", "").lower()
@@ -135,18 +135,14 @@ class ZaskManager(Star):
             raise
 
     async def _send_message(self, task: Dict, components: list):
-        """完全重构的消息发送方法"""
+        """通过事件响应机制发送消息"""
         try:
             # 解析会话标识
             origin_parts = task['origin_id'].split('!')
             if len(origin_parts) < 3:
                 raise ValueError(f"无效的origin_id格式: {task['origin_id']}")
             
-            platform = origin_parts[0].lower()
-            receiver_type = origin_parts[1]
-            receiver_id = origin_parts[2]
-
-            # 构造消息事件结果
+            # 构造消息组件
             result = MessageEventResult()
             for comp in components:
                 if isinstance(comp, Image):
@@ -158,14 +154,13 @@ class ZaskManager(Star):
                 else:
                     result.append(comp)
 
-            # 通过事件响应机制发送
-            await self.context.send_event_result(
-                platform=platform,
-                receiver_type=receiver_type,
-                receiver=receiver_id,
-                result=result
+            # 直接通过事件对象发送
+            yield result.to_message_event(
+                platform=origin_parts[0],
+                receiver_type=origin_parts[1],
+                receiver=origin_parts[2]
             )
-            logger.debug(f"消息已发送至 {platform}/{receiver_type}/{receiver_id}")
+            logger.debug(f"消息已发送至 {task['origin_id']}")
 
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}", exc_info=True)
@@ -200,8 +195,8 @@ class ZaskManager(Star):
             raise RuntimeError(f"执行错误: {str(e)}")
 
     @filter.command("定时")
-    async def schedule_command(self, event: AstrMessageEvent):
-        """处理定时命令"""
+    async def schedule_command(self, event: AstrMessageEvent, context: Context):
+        """处理定时命令（修正参数签名）"""
         try:
             parts = event.message_str.split(maxsplit=3)
             if len(parts) < 2:
@@ -226,25 +221,24 @@ class ZaskManager(Star):
             yield event.plain_result(f"❌ 错误: {str(e)}")
 
     async def _add_task(self, event: AstrMessageEvent, name: str, time_str: str):
-        """添加定时任务"""
+        """添加定时任务（修正字段存储）"""
         if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
             raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
-        group_id = event.get_group_id()
-        user_id = event.get_sender_id()
-        platform = event.get_platform_name().upper()
+        # 获取完整会话标识
+        origin_id = event.unified_msg_origin
+        platform = event.get_platform_name().lower()
 
         script_path = os.path.join(self.plugin_root, f"{name}.py")
         if not os.path.exists(script_path):
-            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root))
+            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root) if f.endswith('.py'))
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
         new_task = {
             "script_name": name,
             "time": time_str,
-            "receiver_type": "group" if group_id else "private",
-            "receiver_origin": event.unified_msg_origin,
-            "platform": event.get_platform_name().lower(),
+            "origin_id": origin_id,
+            "platform": platform,
             "last_run": None,
             "created": datetime.now(china_tz).isoformat()
         }
@@ -260,8 +254,7 @@ class ZaskManager(Star):
             "✅ 定时任务创建成功\n"
             f"名称：{name}\n"
             f"时间：每日 {time_str}\n"
-            f"绑定到：{'群聊' if new_task['receiver_type'] == 'group' else '私聊'}\n"
-            f"平台：{platform}\n"
+            f"平台：{platform.upper()}\n"
             f"任务ID：{new_task['task_id']}"
         )
         yield event.plain_result(reply_msg)
