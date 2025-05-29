@@ -120,7 +120,10 @@ class ZaskManager(Star):
     async def _send_message(self, task: Dict, chain: list):
         """统一消息发送方法"""
         try:
-            platform: WeChatPadProAdapter = self.context.get_platform("wechatpadpro")
+            from astrbot.core.platform.sources.wechatpadpro.wechatpadpro_adapter import WeChatPadProAdapter
+            platform = self.context.get_platform("wechatpadpro")
+            if not isinstance(platform, WeChatPadProAdapter):
+                raise RuntimeError("平台适配器类型错误")
             message = "\n".join([c.text for c in chain if isinstance(c, Plain)])
             
             await platform.send_text(
