@@ -3,6 +3,7 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image
 from astrbot.api.platform import MessageType
+from astrbot.core.platform.astr_message_event import MessageSession
 from astrbot.core.utils.io import download_image_by_url
 import os
 import re
@@ -12,11 +13,9 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Union
 
-# 创建UTC+8时区
 china_tz = timezone(timedelta(hours=8))
 
 def generate_task_id(task: Dict) -> str:
-    """生成唯一任务标识"""
     return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['receiver_type'][0]}_{task['receiver']}"
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
@@ -26,7 +25,6 @@ class ZaskManager(Star):
         self.context = context
         self.config = config or {}
         
-        # 路径配置
         self.plugin_root = os.path.abspath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -118,11 +116,18 @@ class ZaskManager(Star):
             raise
 
     async def _send_message(self, task: Dict, components: list):
-        """统一消息发送方法（适配v4.x API）"""
+        """完全重写的消息发送方法"""
         try:
             platform = self.context.get_platform(task["platform"].lower())
             
-            # 处理图片组件
+            # 构造消息会话
+            session = MessageSession(
+                session_id=task["receiver"],
+                message_type=MessageType.GROUP_MESSAGE if task["receiver_type"] == "group" 
+                            else MessageType.PRIVATE_MESSAGE
+            )
+
+            # 处理消息组件
             processed_components = []
             for comp in components:
                 if isinstance(comp, Image):
@@ -134,15 +139,11 @@ class ZaskManager(Star):
                 else:
                     processed_components.append(comp)
 
-            # 构造发送参数
-            send_params = {
-                "receiver": task["receiver"],
-                "message_components": processed_components,
-                "is_group": task["receiver_type"] == "group"
-            }
-
-            # 发送消息
-            await platform.send_message(**send_params)
+            # 调用平台适配器的正确方法
+            await platform.send_by_session(
+                session=session,
+                message_chain=processed_components  # 直接传递组件列表
+            )
             logger.debug(f"消息已发送至 {task['receiver']}")
 
         except Exception as e:
