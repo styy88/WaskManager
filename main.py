@@ -88,14 +88,23 @@ class ZaskManager(Star):
         return not last_run or (now - last_run).total_seconds() >= 86400
 
     async def _send_task_result(self, task: Dict, message: str):
-        """发送任务结果（修复缩进）"""
+        """发送任务结果（适配最新API）"""
         try:
             chain = [Plain(message[:2000])]
-            await self.context.send_message(
-                target_type=task["target_type"],  # 群聊/私聊
-                target_id=task["target_id"],       # 群号或用户ID
-                chain=chain
-            )
+        
+            # 根据消息类型选择参数
+            if task["target_type"] == "group":
+                await self.context.send_message(
+                    group_id=task["target_id"],  # ✅ 群聊使用 group_id
+                    chain=chain
+                )
+            else:
+                await self.context.send_message(
+                    user_id=task["target_id"],   # ✅ 私聊使用 user_id
+                    chain=chain
+                )
+        except KeyError as e:
+            logger.error(f"任务数据异常，缺少关键字段: {str(e)}")
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}")
 
