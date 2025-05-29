@@ -17,7 +17,7 @@ china_tz = timezone(timedelta(hours=8))
 
 def generate_task_id(task: Dict) -> str:
     """生成唯一任务标识"""
-    return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['receiver_type'][0]}_{task['receiver']}"
+    return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['platform']}_{hash(task['receiver_origin'])}"
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
@@ -253,15 +253,12 @@ class ZaskManager(Star):
 
     async def _delete_task(self, event: AstrMessageEvent, identifier: str):
         """删除当前会话的任务"""
-        group_id = event.get_group_id()
-        receiver_type = "group" if group_id else "private"
-        receiver = group_id if group_id else event.get_sender_id()
-        platform = event.get_platform_name().upper()
+        current_origin = event.unified_msg_origin
+        platform = event.get_platform_name().lower()
         
         current_tasks = [
             t for t in self.tasks 
-            if t["receiver_type"] == receiver_type
-            and t["receiver"] == receiver
+            if t["receiver_origin"] == current_origin
             and t["platform"] == platform
         ]
         
@@ -293,15 +290,12 @@ class ZaskManager(Star):
 
     async def _list_tasks(self, event: AstrMessageEvent):
         """列出当前会话任务"""
-        group_id = event.get_group_id()
-        receiver_type = "group" if group_id else "private"
-        receiver = group_id if group_id else event.get_sender_id()
-        platform = event.get_platform_name().upper()
+        current_origin = event.unified_msg_origin
+        platform = event.get_platform_name().lower()
         
         current_tasks = [
             t for t in self.tasks 
-            if t["receiver_type"] == receiver_type
-            and t["receiver"] == receiver
+            if t["receiver_origin"] == current_origin
             and t["platform"] == platform
         ]
         
