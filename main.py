@@ -100,8 +100,8 @@ class ZaskManager(Star):
             await self._send_error_notice(task, str(e))
 
     async def _send_error_notice(self, task: Dict, error_msg: str):
-        """错误通知处理"""
-        error_chain = MessageChain([Plain(text=f"❌ 任务执行失败: {error_msg[:500]}")])
+        """错误通知处理（适配旧版API）"""
+        error_chain = [Plain(text=f"❌ 任务执行失败: {error_msg[:500]}")]
         await self._send_message(task, error_chain)
 
     async def _send_task_result(self, task: Dict, message: str):
@@ -124,6 +124,18 @@ class ZaskManager(Star):
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}")
             raise RuntimeError("消息发送失败，请检查接收配置")
+            
+    async def _send_message(self, task: Dict, chain: list):
+        """统一消息发送方法"""
+        platform = task["platform"].upper()
+        msg_type = "GROUP_MESSAGE" if task["receiver_type"] == "group" else "PRIVATE_MESSAGE"
+        unified_msg_origin = f"{platform}:{msg_type}:{task['receiver']}"
+        
+        await self.context.send_message(
+            unified_msg_origin=unified_msg_origin,
+            chain=chain
+        )
+        logger.debug(f"消息已发送至 {unified_msg_origin}")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行脚本文件（增加超时处理）"""
