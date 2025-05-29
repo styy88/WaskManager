@@ -90,21 +90,15 @@ class ZaskManager(Star):
     async def _send_task_result(self, task: Dict, message: str):
         """发送任务结果（适配最新API）"""
         try:
-            chain = [Plain(message[:2000])]
+            # 构造消息链
+            chain = [Plain(text=message[:2000])]
         
-            # 根据消息类型选择参数
-            if task["target_type"] == "group":
-                await self.context.send_message(
-                    group_id=task["target_id"],  # ✅ 群聊使用 group_id
-                    chain=chain
-                )
-            else:
-                await self.context.send_message(
-                    user_id=task["target_id"],   # ✅ 私聊使用 user_id
-                    chain=chain
-                )
-        except KeyError as e:
-            logger.error(f"任务数据异常，缺少关键字段: {str(e)}")
+            # 使用统一消息发送接口
+            await self.context.send_message(
+                receiver=task["receiver"],        # 接收者ID（群号或用户ID）
+                receiver_type=task["receiver_type"],  # 接收者类型 group/private
+                chain=chain
+            )
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}")
 
@@ -179,7 +173,7 @@ class ZaskManager(Star):
             yield event.plain_result(f"❌ 错误: {str(e)}")
 
     async def _add_task(self, event: AstrMessageEvent, name: str, time_str: str):
-        """添加定时任务（修复变量名）"""
+        """添加定时任务"""
         if not name or not time_str:
             raise ValueError("参数不能为空，格式：/定时 添加 [脚本名] [时间]")
         
@@ -187,9 +181,8 @@ class ZaskManager(Star):
             raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
         # 获取会话信息
-        group_id = event.get_group_id()  # ✅ 使用标准API
-        target_type = "group" if group_id else "private"
-        target_id = group_id if group_id else event.get_sender_id()
+        group_id = event.get_group_id()
+        user_id = event.get_sender_id()
 
         # 脚本存在性检查（修复变量名）
         script_path = os.path.join(self.plugin_root, f"{name}.py")  # ✅ 使用 plugin_root
@@ -201,8 +194,8 @@ class ZaskManager(Star):
         new_task = {
             "script_name": name,
             "time": time_str,
-            "target_type": target_type,
-            "target_id": target_id,
+            "receiver_type": "group" if group_id else "private",  # ✅ 新字段名
+            "receiver": group_id if group_id else user_id,        # ✅ 新字段名
             "last_run": None,
             "created": datetime.now(china_tz).isoformat()
         }
