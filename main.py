@@ -96,18 +96,26 @@ class ZaskManager(Star):
         return not last_run or (now - last_run).total_seconds() >= 86400  # 24小时间隔
 
     async def _send_task_result(self, task: Dict, message: str) -> None:
-        """通过 unified_msg_origin 发送任务结果"""
+        """通过解析 unified_msg_origin 发送任务结果（兼容旧版 send_message）"""
         try:
+            # 解析 unified_msg_origin：格式为 platform:message_type:session_id
+            platform, message_type, session_id = task["unified_msg_origin"].split(':', 2)
+            
+            # 推导 receiver_type 和 receiver
+            receiver_type = "private" if message_type == "FriendMessage" else "group"
+            receiver = session_id  # session_id 对应「用户ID（私聊）」或「群ID（群聊）」
+            
             # 构造消息链（纯文本，限制长度2000字符）
             chain = [Plain(text=message[:2000])]
             
-            # 调用 AstrBot 上下文的 send_message，传入会话唯一标识
+            # 调用旧版 Context.send_message 接口
             await self.context.send_message(
-                unified_msg_origin=task["unified_msg_origin"],
+                receiver_type=receiver_type,
+                receiver=receiver,
                 chain=chain
             )
         except Exception as e:
-            logger.error(f"消息发送失败: {str(e)}")
+            logger.error(f"消息发送失败: {str(e)}，任务详情：{task}")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行指定Python脚本（带超时/错误处理）"""
