@@ -127,9 +127,9 @@ class ZaskManager(Star):
             chain=chain
         )
         logger.debug(f"消息已发送至 {task['receiver']}")
-    except Exception as e:
-        logger.error(f"消息发送失败: {str(e)}")
-        raise RuntimeError(f"消息发送失败: {str(e)}")
+        except Exception as e:
+            logger.error(f"消息发送失败: {str(e)}")
+            raise RuntimeError(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行脚本文件"""
