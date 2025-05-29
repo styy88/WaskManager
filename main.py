@@ -122,17 +122,11 @@ class ZaskManager(Star):
         try:
             platform: WeChatPadProAdapter = self.context.get_platform("wechatpadpro")
             message = "\n".join([c.text for c in chain if isinstance(c, Plain)])
-            # 根据接收类型发送消息
-            if task["receiver_type"] == "group":
-                await platform.send_group_message(
-                    group_wxid=task["receiver"],
-                    content=message
-                )
-            else:
-                await platform.send_private_message(
-                    user_wxid=task["receiver"],
-                    content=message
-                )
+            
+            await platform.send_text(
+                to_wxid=task["receiver"],
+                content=message
+            )
             logger.debug(f"微信消息已发送至 {task['receiver']}")
         except Exception as e:
             logger.error(f"微信消息发送失败: {str(e)}")
