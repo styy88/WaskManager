@@ -120,10 +120,10 @@ class ZaskManager(Star):
         """消息发送"""
         try:
             # 构造目标会话信息
-            target = {
-                "platform": task['platform'].lower(),
-                "receiver_type": task['receiver_type'],
-                "receiver_id": task['receiver']
+            session_id = (
+                f"{task['platform'].lower()}:"
+                f"{'GroupMessage' if task['receiver_type'] == 'group' else 'FriendMessage'}:"
+                f"{task['receiver_origin']}"
             }
             
             # 处理消息组件
@@ -139,11 +139,11 @@ class ZaskManager(Star):
                     message_chain.append(comp)
 
             # 发送
-            await self.context.send_message(
-                target=target,
-                message_chain=message_chain
+            await self.context.send_event_result(
+                session_id=session_id,
+                result=MessageEventResult(message_chain)
             )
-            logger.debug(f"消息已发送至 {target}")
+            logger.debug(f"消息已发送至 {session_id}")
 
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}", exc_info=True)
@@ -221,8 +221,8 @@ class ZaskManager(Star):
             "script_name": name,
             "time": time_str,
             "receiver_type": "group" if group_id else "private",
-            "receiver": group_id if group_id else user_id,
-            "platform": event.get_platform_name().upper(),
+            "receiver_origin": event.unified_msg_origin,
+            "platform": event.get_platform_name().lower(),
             "last_run": None,
             "created": datetime.now(china_tz).isoformat()
         }
