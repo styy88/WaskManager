@@ -88,21 +88,16 @@ class ZaskManager(Star):
         return not last_run or (now - last_run).total_seconds() >= 86400
 
     async def _send_task_result(self, task: Dict, message: str):
-        """发送任务结果"""
-        try:
-            chain = [Plain(message[:2000])]
-            if task["target_type"] == "group":
-                await self.context.send_message(
-                    unified_msg_origin=f"group_{task['target_id']}",
-                    chain=chain
-                )
-            else:
-                await self.context.send_message(
-                    unified_msg_origin=f"private_{task['target_id']}",
-                    chain=chain
-                )
-        except Exception as e:
-            logger.error(f"消息发送失败: {str(e)}")
+    """发送任务结果"""
+    try:
+        chain = [Plain(message[:2000])]
+        await self.context.send_message(
+            target_type=task["target_type"],  # 直接使用保存的群聊/私聊类型
+            target_id=task["target_id"],      # 使用保存的群号或用户ID
+            chain=chain
+        )
+    except Exception as e:
+        logger.error(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行脚本文件"""
@@ -130,7 +125,7 @@ class ZaskManager(Star):
             raise RuntimeError(f"未知错误: {str(e)}")
 
     @filter.command("定时")
-    async def schedule_command(self, event: AstrMessageEvent):  # 修复前这里缩进错误
+    async def schedule_command(self, event: AstrMessageEvent):
         """处理定时命令"""
         try:
             parts = event.message_str.split(maxsplit=3)
