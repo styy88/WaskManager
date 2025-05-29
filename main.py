@@ -124,7 +124,7 @@ class ZaskManager(Star):
                 f"{task['platform'].lower()}:"
                 f"{'GroupMessage' if task['receiver_type'] == 'group' else 'FriendMessage'}:"
                 f"{task['receiver_origin']}"
-            }
+            )
             
             # 处理消息组件
             message_chain = []
