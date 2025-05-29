@@ -15,7 +15,7 @@ china_tz = timezone(timedelta(hours=8))
 
 def generate_task_id(task: Dict) -> str:
     """生成唯一任务标识"""
-    return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['target_type'][0]}_{task['target_id']}"
+    return f"{task['script_name']}_{task['time'].replace(':', '')}_{task['receiver_type'][0]}_{task['receiver']}"
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
@@ -272,8 +272,8 @@ class ZaskManager(Star):
             
         task_list = [
             "📅 当前会话定时任务列表",
-            f"会话类型：{'群聊' if target_type == 'group' else '私聊'}",
-            f"会话ID：{target_id}",
+            f"会话类型：{'群聊' if receiver_type == 'group' else '私聊'}",
+            f"会话ID：{receiver_type}",
             "━━━━━━━━━━━━━━━━"
         ]
         
