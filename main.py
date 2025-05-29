@@ -134,16 +134,15 @@ class ZaskManager(Star):
                 else:
                     processed_components.append(comp)
 
-            # 构造消息事件
-            event = AstrMessageEvent(
-                platform_meta=platform.meta(),
-                message_obj=processed_components,
-                unified_msg_origin=task["receiver"],
-                is_group=task["receiver_type"] == "group"
-            )
+            # 构造发送参数
+            send_params = {
+                "receiver": task["receiver"],
+                "message_components": processed_components,
+                "is_group": task["receiver_type"] == "group"
+            }
 
             # 发送消息
-            await platform.send_message(event)
+            await platform.send_message(**send_params)
             logger.debug(f"消息已发送至 {task['receiver']}")
 
         except Exception as e:
