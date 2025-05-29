@@ -20,16 +20,15 @@ def generate_task_id(task: Dict) -> str:
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
-    def __init__(self, context: Context, config: dict = None, db: object = None):  # 关键修复：添加默认值
-        # 正确初始化父类
-        super().__init__(context, config or {}, db or context.db)  # 使用上下文中的db
+    def __init__(self, context: Context, config: dict = None, **kwargs):  # 关键修复：使用**kwargs接收额外参数
+        # 正确初始化父类（适配框架API变更）
+        super().__init__(context, config or {})
         
         # 成员变量初始化
         self.context = context
         self.config = config or {}
-        self.db = db or context.db  # 确保db不为空
         
-        # 路径配置
+        # 路径配置（完全独立于数据库）
         self.plugin_root = os.path.abspath(
             os.path.join(
                 os.path.dirname(__file__),
