@@ -88,16 +88,16 @@ class ZaskManager(Star):
         return not last_run or (now - last_run).total_seconds() >= 86400
 
     async def _send_task_result(self, task: Dict, message: str):
-    """发送任务结果"""
-    try:
-        chain = [Plain(message[:2000])]
-        await self.context.send_message(
-            target_type=task["target_type"],  # 直接使用保存的群聊/私聊类型
-            target_id=task["target_id"],      # 使用保存的群号或用户ID
-            chain=chain
-        )
-    except Exception as e:
-        logger.error(f"消息发送失败: {str(e)}")
+        """发送任务结果（修复缩进）"""
+        try:
+            chain = [Plain(message[:2000])]
+            await self.context.send_message(
+                target_type=task["target_type"],  # 群聊/私聊
+                target_id=task["target_id"],       # 群号或用户ID
+                chain=chain
+            )
+        except Exception as e:
+            logger.error(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行脚本文件"""
