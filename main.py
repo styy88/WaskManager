@@ -63,19 +63,29 @@ class ZaskManager(Star):
     async def schedule_checker(self):
         """定时任务检查器"""
         logger.info("定时检查器启动")
-        while True:
-            await asyncio.sleep(30)
-            now = datetime.now(china_tz)
-            current_time = now.strftime("%H:%M")
-            for task in self.tasks.copy():
-                if task["time"] == current_time:
-                    await self._process_task(task, now)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"定时检查器错误: {str(e)}")
-                await asyncio.sleep(10)
-
+        try:
+            while True:
+                try:
+                    now = datetime.now()
+                    sleep_time = 30 - (now.second % 30)
+                    await asyncio.sleep(sleep_time)
+                    
+                    current_time = datetime.now(china_tz).strftime("%H:%M")
+                    logger.debug(f"检查时间: {current_time}")
+                    
+                    for task in self.tasks.copy():
+                        if task["time"] == current_time and self._should_trigger(task, datetime.now(china_tz)):
+                            logger.info(f"触发任务: {task['task_id']}")
+                            await self._process_task(task, datetime.now(china_tz))
+                            
+                except asyncio.CancelledError:
+                    logger.info("定时检查器被终止")
+                    break
+                except Exception as e:
+                    logger.error(f"定时检查器错误: {str(e)}", exc_info=True)
+                    await asyncio.sleep(10)
+        finally:
+            logger.info("定时检查器已关闭")
     def _should_trigger(self, task: Dict, now: datetime) -> bool:
         """判断是否应该触发任务"""
         last_run = datetime.fromisoformat(task["last_run"]).astimezone(china_tz) if task.get("last_run") else None
