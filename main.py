@@ -1,7 +1,7 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api.message_components import Plain, Image, MessageChain
+from astrbot.api.message_components import Plain, Image
 from astrbot.api.platform import MessageType, MessageSession
 from astrbot.core.utils.io import download_image_by_url
 import os
@@ -118,50 +118,39 @@ class ZaskManager(Star):
             logger.error(f"消息发送失败: {str(e)}")
             raise
 
-    async def _send_message(self, task: Dict, chain: MessageChain):
-        """统一消息发送方法（严格遵循微信PadPro规范）"""
+    async def _send_message(self, task: Dict, chain: list):
+        """统一消息发送方法（兼容旧版API）"""
         try:
-            # 获取平台适配器并验证类型
             platform = self.context.get_platform(task["platform"].lower())
-            from astrbot.core.platform.sources.wechatpadpro.wechatpadpro_adapter import WeChatPadProAdapter
-            if not isinstance(platform, WeChatPadProAdapter):
-                raise TypeError("平台适配器类型错误")
-
-            # 转换消息类型
-            message_type = (
-                MessageType.GROUP_MESSAGE 
-                if task["receiver_type"] == "group" 
-                else MessageType.PRIVATE_MESSAGE
-            )
-
-            # 处理图片消息
-            processed_chain = MessageChain()
-            for component in chain.chain:
+            
+            # 构造消息组件列表
+            message_components = []
+            for component in chain:
                 if isinstance(component, Image):
                     # 处理图片路径转换
                     if component.file.startswith("http"):
                         local_path = await download_image_by_url(component.file)
-                        processed_chain.append(Image(file=f"file:///{local_path}"))
+                        message_components.append(Image(file=f"file:///{local_path}"))
                     else:
-                        processed_chain.append(component)
+                        message_components.append(component)
                 else:
-                    processed_chain.append(component)
-
+                    message_components.append(component)
+            
             # 创建会话对象
             session = MessageSession(
                 session_id=task["receiver"],
-                message_type=message_type
+                message_type=MessageType.GROUP_MESSAGE if task["receiver_type"] == "group" else MessageType.PRIVATE_MESSAGE
             )
 
             # 发送消息
             await platform.send_by_session(
                 session=session,
-                message_chain=processed_chain
+                message_chain=message_components  # 直接传递列表
             )
             logger.debug(f"消息已发送至 {task['receiver']}")
 
         except Exception as e:
-            logger.error(f"消息发送失败详情: {str(e)}", exc_info=True)
+            logger.error(f"消息发送失败: {str(e)}", exc_info=True)
             raise RuntimeError(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
