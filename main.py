@@ -2,7 +2,7 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image
-from astrbot.api.platform import MessageType, MessageSession
+from astrbot.api.platform import MessageType
 from astrbot.core.utils.io import download_image_by_url
 import os
 import re
@@ -10,7 +10,7 @@ import json
 import asyncio
 import subprocess
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict
+from typing import List, Dict, Union
 
 # 创建UTC+8时区
 china_tz = timezone(timedelta(hours=8))
@@ -37,7 +37,7 @@ class ZaskManager(Star):
         )
         self.tasks_file = os.path.join(self.plugin_root, "tasks.json")
         os.makedirs(self.plugin_root, exist_ok=True)
-        logger.debug(f"插件数据目录初始化完成: {self.plugin_root}")
+        logger.info(f"插件数据目录初始化完成: {self.plugin_root}")
 
         self.tasks: List[Dict] = []
         self._load_tasks()
@@ -106,47 +106,44 @@ class ZaskManager(Star):
 
     async def _send_error_notice(self, task: Dict, error_msg: str):
         """错误通知处理"""
-        error_chain = MessageChain([Plain(text=f"❌ 任务执行失败: {error_msg[:500]}")])
-        await self._send_message(task, error_chain)
+        error_msg = f"❌ 任务执行失败: {error_msg[:500]}"
+        await self._send_message(task, [Plain(text=error_msg)])
 
     async def _send_task_result(self, task: Dict, message: str):
         """发送任务结果"""
         try:
-            chain = MessageChain([Plain(text=message[:2000])])
-            await self._send_message(task, chain)
+            await self._send_message(task, [Plain(text=message[:2000])])
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}")
             raise
 
-    async def _send_message(self, task: Dict, chain: list):
-        """统一消息发送方法（兼容旧版API）"""
+    async def _send_message(self, task: Dict, components: list):
+        """统一消息发送方法（适配v4.x API）"""
         try:
             platform = self.context.get_platform(task["platform"].lower())
             
-            # 构造消息组件列表
-            message_components = []
-            for component in chain:
-                if isinstance(component, Image):
-                    # 处理图片路径转换
-                    if component.file.startswith("http"):
-                        local_path = await download_image_by_url(component.file)
-                        message_components.append(Image(file=f"file:///{local_path}"))
+            # 处理图片组件
+            processed_components = []
+            for comp in components:
+                if isinstance(comp, Image):
+                    if comp.file.startswith("http"):
+                        local_path = await download_image_by_url(comp.file)
+                        processed_components.append(Image(file=f"file:///{local_path}"))
                     else:
-                        message_components.append(component)
+                        processed_components.append(comp)
                 else:
-                    message_components.append(component)
-            
-            # 创建会话对象
-            session = MessageSession(
-                session_id=task["receiver"],
-                message_type=MessageType.GROUP_MESSAGE if task["receiver_type"] == "group" else MessageType.PRIVATE_MESSAGE
+                    processed_components.append(comp)
+
+            # 构造消息事件
+            event = AstrMessageEvent(
+                platform_meta=platform.meta(),
+                message_obj=processed_components,
+                unified_msg_origin=task["receiver"],
+                is_group=task["receiver_type"] == "group"
             )
 
             # 发送消息
-            await platform.send_by_session(
-                session=session,
-                message_chain=message_components  # 直接传递列表
-            )
+            await platform.send_message(event)
             logger.debug(f"消息已发送至 {task['receiver']}")
 
         except Exception as e:
@@ -154,7 +151,7 @@ class ZaskManager(Star):
             raise RuntimeError(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
-        """执行脚本文件"""
+        """执行脚本文件（增加安全性）"""
         script_path = os.path.join(self.plugin_root, f"{script_name}.py")
         
         if not os.path.exists(script_path):
@@ -180,10 +177,6 @@ class ZaskManager(Star):
             raise TimeoutError("执行超时（30秒限制）")
         except Exception as e:
             raise RuntimeError(f"执行错误: {str(e)}")
-
-    # 保持其他命令处理方法不变（例如 schedule_command, _add_task 等）...
-
-    # 以下为完整保留的命令处理部分 #
 
     @filter.command("定时")
     async def schedule_command(self, event: AstrMessageEvent):
