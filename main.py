@@ -124,6 +124,7 @@ class ZaskManager(Star):
                 "platform": task['platform'].lower(),
                 "receiver_type": task['receiver_type'],
                 "receiver_id": task['receiver']
+            }
             
             # 处理消息组件
             message_chain = []
