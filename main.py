@@ -119,6 +119,7 @@ class ZaskManager(Star):
     async def _send_message(self, task: Dict, components: list):
         """统一消息发送方法（完全适配官方API）"""
         try:
+            session_id = f"{task['platform'].lower()}:{task['receiver_type'].capitalize()}:{task['receiver']}"
             # 处理消息组件
             message_chain = []
             for comp in components:
@@ -128,21 +129,15 @@ class ZaskManager(Star):
                         message_chain.append(Image(file=f"file:///{local_path}"))
                     else:
                         message_chain.append(comp)
-                elif isinstance(comp, Plain):
-                    message_chain.append(comp)
                 else:
-                    logger.warning(f"跳过不支持的消息组件类型: {type(comp)}")
-
-            # 构造符合官方要求的会话参数
-            send_params = {
-                "receiver": task["receiver"],
-                "message_chain": message_chain,
-                "is_group": task["receiver_type"] == "group"
-            }
+                    message_chain.append(comp)
 
             # 使用官方推荐的消息发送接口
-            await self.context.send_message(**send_params)
-            logger.debug(f"消息已发送至 {task['receiver']}")
+            await self.context.send_message(
+                session_id=session_id,
+                message_chain=message_chain
+            )
+            logger.debug(f"消息已发送至 {session_id}")
 
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}", exc_info=True)
