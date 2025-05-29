@@ -166,13 +166,17 @@ class ZaskManager(Star):
 
             command = parts[1].lower()
             if command == "添加":
-                await self._handle_add_command(event, parts)
+                async for msg in self._add_task(event, parts[2], parts[3]):
+                    yield msg
             elif command == "删除":
-                await self._handle_delete_command(event, parts)
+                async for msg in self._delete_task(event, parts[2]):
+                    yield msg
             elif command == "列出":
-                await self._list_tasks(event)
+                async for msg in self._list_tasks(event):
+                    yield msg
             else:
-                await self._show_help(event)
+                async for msg in self._show_help(event):
+                    yield msg
 
         except Exception as e:
             event.stop_event()
