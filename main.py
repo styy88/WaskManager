@@ -2,7 +2,7 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image
-from astrbot.api.platform import MessageType
+from astrbot.core.platform.astr_message_event import MessageSession
 from astrbot.core.utils.io import download_image_by_url
 import os
 import re
@@ -117,9 +117,15 @@ class ZaskManager(Star):
             raise
 
     async def _send_message(self, task: Dict, components: list):
-        """统一消息发送方法（完全适配官方API）"""
+        """统一消息发送方法（已修复参数问题）"""
         try:
-            session_id = f"{task['platform'].lower()}:{task['receiver_type'].capitalize()}:{task['receiver']}"
+            # 构造符合要求的会话对象
+            session = MessageSession(
+                session_id=task["receiver"],
+                message_type=MessageType.GROUP_MESSAGE if task["receiver_type"] == "group" 
+                            else MessageType.PRIVATE_MESSAGE
+            )
+
             # 处理消息组件
             message_chain = []
             for comp in components:
@@ -132,12 +138,15 @@ class ZaskManager(Star):
                 else:
                     message_chain.append(comp)
 
-            # 使用官方推荐的消息发送接口
-            await self.context.send_message(
-                session_id=session_id,
+            # 获取平台适配器实例
+            platform = self.context.get_platform(task["platform"].lower())
+            
+            # 使用正确的发送方法
+            await platform.send_by_session(
+                session=session,
                 message_chain=message_chain
             )
-            logger.debug(f"消息已发送至 {session_id}")
+            logger.debug(f"消息已发送至 {task['receiver']}")
 
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}", exc_info=True)
