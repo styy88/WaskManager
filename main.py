@@ -1,22 +1,21 @@
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, MessageChain
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api.message_components import Plain
+from astrbot.api.message_components import Plain  # 文本消息组件
+from astrbot.api.platform import MessageType     # 消息类型枚举（按需）
+from datetime import datetime, timedelta, timezone
 import os
 import re
 import json
 import asyncio
 import subprocess
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict
-
-# 创建 UTC+8 时区
-china_tz = timezone(timedelta(hours=8))
+from typing import List, Dict, Optional
 
 def generate_task_id(task: Dict) -> str:
-    """基于「脚本名+时间+会话ID」生成唯一任务标识"""
+    """基于「平台+消息类型+会话ID+脚本名+时间」生成唯一任务标识"""
     platform, msg_type, session_id = task["unified_msg_origin"].split(':', 2)
     return f"{task['script_name']}_{task['time'].replace(':', '')}_{session_id}"
+
 
 @register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
@@ -24,7 +23,7 @@ class ZaskManager(Star):
         super().__init__(context)
         self.config = config or {}
         
-        # 插件数据目录（持久化任务/脚本）
+        # 插件数据目录（持久化任务/脚本，遵循 data 目录规范）
         self.plugin_root = os.path.abspath(
             os.path.join(
                 os.path.dirname(__file__),
@@ -39,10 +38,10 @@ class ZaskManager(Star):
 
         self.tasks: List[Dict] = []
         self._load_tasks()  # 加载历史任务
-        self.schedule_checker_task = asyncio.create_task(self.schedule_checker())  # 启动定时检查
+        self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
 
     def _load_tasks(self) -> None:
-        """安全加载任务（兼容旧版本数据）"""
+        """安全加载任务（过滤旧格式数据，确保含 unified_msg_origin）"""
         try:
             if not os.path.exists(self.plugin_root):
                 os.makedirs(self.plugin_root, exist_ok=True)
@@ -51,15 +50,12 @@ class ZaskManager(Star):
             if os.path.exists(self.tasks_file):
                 with open(self.tasks_file, "r", encoding="utf-8") as f:
                     raw_tasks = json.load(f)
-                    self.tasks = []
-                    for task in raw_tasks:
-                        # 仅加载包含 unified_msg_origin 的新格式任务
-                        if "unified_msg_origin" in task:
-                            task["task_id"] = task.get("task_id") or generate_task_id(task)
-                            self.tasks.append(task)
-                        else:
-                            logger.warning(f"跳过旧格式任务（缺失 unified_msg_origin）: {task}")
-                    logger.info(f"成功加载 {len(self.tasks)} 个有效任务")
+                    self.tasks = [
+                        {**task, "task_id": task.get("task_id") or generate_task_id(task)}
+                        for task in raw_tasks
+                        if "unified_msg_origin" in task  # 仅加载新格式任务
+                    ]
+                logger.info(f"成功加载 {len(self.tasks)} 个有效任务")
             else:
                 self.tasks = []
                 logger.info("任务文件不存在，已初始化空任务列表")
@@ -69,15 +65,19 @@ class ZaskManager(Star):
 
     def _save_tasks(self) -> None:
         """安全保存任务到本地文件"""
-        with open(self.tasks_file, "w", encoding="utf-8") as f:
-            json.dump(self.tasks, f, indent=2, ensure_ascii=False)
+        try:
+            with open(self.tasks_file, "w", encoding="utf-8") as f:
+                json.dump(self.tasks, f, indent=2, ensure_ascii=False)
+            logger.debug("任务数据已持久化")
+        except Exception as e:
+            logger.error(f"任务保存失败: {str(e)}")
 
     async def schedule_checker(self) -> None:
         """定时任务检查器（每30秒轮询一次）"""
         logger.info("定时检查器启动")
         while True:
             await asyncio.sleep(30 - datetime.now().second % 30)  # 每30秒对齐检查
-            now = datetime.now(china_tz)
+            now = datetime.now(timezone(timedelta(hours=8)))  # UTC+8 时区
             current_time = now.strftime("%H:%M")
             
             for task in self.tasks.copy():  # 复制列表避免迭代中修改
@@ -96,24 +96,17 @@ class ZaskManager(Star):
         return not last_run or (now - last_run).total_seconds() >= 86400  # 24小时间隔
 
     async def _send_task_result(self, task: Dict, message: str) -> None:
-        """通过解析 unified_msg_origin 发送任务结果（兼容旧版 send_message）"""
+        """使用 AstrBot 标准消息发送接口（unified_msg_origin + MessageChain）"""
         try:
-            # 解析 unified_msg_origin：格式为 platform:message_type:session_id
-            platform, message_type, session_id = task["unified_msg_origin"].split(':', 2)
-            
-            # 推导 receiver_type 和 receiver
-            receiver_type = "private" if message_type == "FriendMessage" else "group"
-            receiver = session_id  # session_id 对应「用户ID（私聊）」或「群ID（群聊）」
-            
             # 构造消息链（纯文本，限制长度2000字符）
-            chain = [Plain(text=message[:2000])]
+            message_chain = MessageChain([Plain(text=message[:2000])])
             
-            # 调用旧版 Context.send_message 接口
+            # 调用 AstrBot 上下文的标准发送方法：target + chain（位置参数）
             await self.context.send_message(
-                receiver_type=receiver_type,
-                receiver=receiver,
-                chain=chain
+                task["unified_msg_origin"],  # 会话唯一标识作为 target
+                message_chain                # 消息链
             )
+            logger.debug("消息已成功发送到目标会话")
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}，任务详情：{task}")
 
@@ -156,19 +149,20 @@ class ZaskManager(Star):
             if len(parts) < 2:
                 raise ValueError("命令格式错误，请输入 `/定时 帮助` 查看用法")
 
-            if parts[1] == "添加":
+            cmd = parts[1]
+            if cmd == "添加":
                 if len(parts) != 4:
                     raise ValueError("格式应为：/定时 添加 [脚本名] [时间]")
                 async for msg in self._add_task(event, parts[2], parts[3]):
                     yield msg
                     
-            elif parts[1] == "删除":
+            elif cmd == "删除":
                 if len(parts) != 3:
                     raise ValueError("格式应为：/定时 删除 [任务ID或名称]")
                 async for msg in self._delete_task(event, parts[2]):
                     yield msg
                     
-            elif parts[1] == "列出":
+            elif cmd == "列出":
                 async for msg in self._list_tasks(event):
                     yield msg
                     
@@ -217,7 +211,7 @@ class ZaskManager(Star):
             "time": time_str,
             "unified_msg_origin": unified_msg_origin,
             "last_run": None,
-            "created": datetime.now(china_tz).isoformat()
+            "created": datetime.now(timezone(timedelta(hours=8))).isoformat()
         }
         new_task["task_id"] = generate_task_id(new_task)  # 生成唯一ID
         
