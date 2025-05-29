@@ -2,7 +2,7 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain, Image
-from astrbot.api.platform import MessageType
+from astrbot.core.platform.sources.wechatpadpro.wechatpadpro_adapter import WeChatPadProAdapter
 import os
 import re
 import json
@@ -120,18 +120,23 @@ class ZaskManager(Star):
     async def _send_message(self, task: Dict, chain: list):
         """统一消息发送方法"""
         try:
-            platform = self.context.get_platform(task["platform"].lower())
-            message_type = "group" if task["receiver_type"] == "group" else "private"
-        
-            await platform.send_message(
-                receiver=task["receiver"],
-                message_type=message_type,
-                chain=chain
-            )
-            logger.debug(f"消息已发送至 {task['receiver']}")
+            platform: WeChatPadProAdapter = self.context.get_platform("wechatpadpro")
+            message = "\n".join([c.text for c in chain if isinstance(c, Plain)])
+            # 根据接收类型发送消息
+            if task["receiver_type"] == "group":
+                await platform.send_group_message(
+                    group_wxid=task["receiver"],
+                    content=message
+                    )
+                else:
+                    await platform.send_private_message(
+                        user_wxid=task["receiver"],
+                        content=message
+                    )
+            logger.debug(f"微信消息已发送至 {task['receiver']}")
         except Exception as e:
-            logger.error(f"消息发送失败: {str(e)}")
-            raise RuntimeError(f"消息发送失败: {str(e)}")
+            logger.error(f"微信消息发送失败: {str(e)}")
+            raise RuntimeError(f"微信消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行脚本文件"""
