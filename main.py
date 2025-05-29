@@ -212,7 +212,7 @@ class ZaskManager(Star):
             "✅ 定时任务创建成功\n"
             f"名称：{name}\n"
             f"时间：每日 {time_str}\n"
-            f"绑定到：{'群聊' if target_type == 'group' else '私聊'}\n"
+            f"绑定到：{'群聊' if new_task['receiver_type'] == 'group' else '私聊'}\n"
             f"任务ID：{new_task['task_id']}"
         )
         yield event.plain_result(reply_msg)
@@ -220,13 +220,13 @@ class ZaskManager(Star):
     async def _delete_task(self, event: AstrMessageEvent, identifier: str):
         """删除当前会话的任务"""
         group_id = event.get_group_id()
-        target_type = "group" if group_id else "private"
-        target_id = group_id if group_id else event.get_sender_id()
+        receiver_type = "group" if group_id else "private"
+        receiver = group_id if group_id else event.get_sender_id()
         
         current_tasks = [
             t for t in self.tasks 
-            if t["target_type"] == target_type
-            and t["target_id"] == target_id
+            if t["receiver_type"] == receiver_type
+            and t["receiver"] == receiver
         ]
         
         if not current_tasks:
@@ -257,13 +257,13 @@ class ZaskManager(Star):
     async def _list_tasks(self, event: AstrMessageEvent):
         """列出当前会话任务"""
         group_id = event.get_group_id()
-        target_type = "group" if group_id else "private"
-        target_id = group_id if group_id else event.get_sender_id()
+        receiver_type = "group" if group_id else "private"
+        receiver = group_id if group_id else event.get_sender_id()
         
         current_tasks = [
             t for t in self.tasks 
-            if t["target_type"] == target_type
-            and t["target_id"] == target_id
+            if t["receiver_type"] == receiver_type
+            and t["receiver"] == receiver
         ]
         
         if not current_tasks:
