@@ -117,28 +117,31 @@ class ZaskManager(Star):
             raise
 
     async def _send_message(self, task: Dict, components: list):
-        """统一消息发送方法（适配最新API）"""
+        """统一消息发送方法（完全适配官方API）"""
         try:
-            platform = self.context.get_platform(task["platform"].lower())
-            
-            # 处理图片组件
-            processed_components = []
+            # 处理消息组件
+            message_chain = []
             for comp in components:
                 if isinstance(comp, Image):
                     if comp.file.startswith("http"):
                         local_path = await download_image_by_url(comp.file)
-                        processed_components.append(Image(file=f"file:///{local_path}"))
+                        message_chain.append(Image(file=f"file:///{local_path}"))
                     else:
-                        processed_components.append(comp)
+                        message_chain.append(comp)
+                elif isinstance(comp, Plain):
+                    message_chain.append(comp)
                 else:
-                    processed_components.append(comp)
+                    logger.warning(f"跳过不支持的消息组件类型: {type(comp)}")
 
-            # 使用最新消息发送接口
-            await platform.send_message(
-                receiver=task["receiver"],
-                message_components=processed_components,
-                is_group=(task["receiver_type"] == "group")
-            )
+            # 构造符合官方要求的会话参数
+            send_params = {
+                "receiver": task["receiver"],
+                "message_chain": message_chain,
+                "is_group": task["receiver_type"] == "group"
+            }
+
+            # 使用官方推荐的消息发送接口
+            await self.context.send_message(**send_params)
             logger.debug(f"消息已发送至 {task['receiver']}")
 
         except Exception as e:
@@ -146,11 +149,20 @@ class ZaskManager(Star):
             raise RuntimeError(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
-        """执行脚本文件（增加安全性）"""
-        script_path = os.path.join(self.plugin_root, f"{script_name}.py")
+        """执行脚本文件（增加安全性检查）"""
+        # 防止路径遍历攻击
+        script_name = os.path.basename(script_name)
+        if not script_name.endswith('.py'):
+            raise ValueError("仅支持执行.py脚本文件")
+
+        script_path = os.path.join(self.plugin_root, f"{script_name}")
         
         if not os.path.exists(script_path):
-            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root) if f.endswith('.py'))
+            available = ", ".join(
+                f.replace('.py', '') 
+                for f in os.listdir(self.plugin_root) 
+                if f.endswith('.py') and not f.startswith('_')
+            )
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
         try:
