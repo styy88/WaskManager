@@ -149,20 +149,11 @@ class ZaskManager(Star):
             raise RuntimeError(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
-        """执行脚本文件（增加安全性检查）"""
-        # 防止路径遍历攻击
-        script_name = os.path.basename(script_name)
-        if not script_name.endswith('.py'):
-            raise ValueError("仅支持执行.py脚本文件")
-
-        script_path = os.path.join(self.plugin_root, f"{script_name}")
+        """执行脚本文件（增加安全性）"""
+        script_path = os.path.join(self.plugin_root, f"{script_name}.py")
         
         if not os.path.exists(script_path):
-            available = ", ".join(
-                f.replace('.py', '') 
-                for f in os.listdir(self.plugin_root) 
-                if f.endswith('.py') and not f.startswith('_')
-            )
+            available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root) if f.endswith('.py'))
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
         try:
