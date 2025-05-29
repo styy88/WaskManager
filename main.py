@@ -117,10 +117,13 @@ class ZaskManager(Star):
             raise
 
     async def _send_message(self, task: Dict, components: list):
-        """完全适配v4.x的消息发送方法"""
+        """消息发送"""
         try:
-            # 构造平台适配器所需的会话ID格式
-            session_id = f"{task['platform'].lower()}:{'Group' if task['receiver_type'] == 'group' else 'Private'}:{task['receiver']}"
+            # 构造目标会话信息
+            target = {
+                "platform": task['platform'].lower(),
+                "receiver_type": task['receiver_type'],
+                "receiver_id": task['receiver']
             
             # 处理消息组件
             message_chain = []
@@ -134,12 +137,12 @@ class ZaskManager(Star):
                 else:
                     message_chain.append(comp)
 
-            # 直接使用上下文发送接口
+            # 发送
             await self.context.send_message(
-                session_id=session_id,
+                target=target,
                 message_chain=message_chain
             )
-            logger.debug(f"消息已发送至 {session_id}")
+            logger.debug(f"消息已发送至 {target}")
 
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}", exc_info=True)
@@ -218,7 +221,7 @@ class ZaskManager(Star):
             "time": time_str,
             "receiver_type": "group" if group_id else "private",
             "receiver": group_id if group_id else user_id,
-            "platform": platform,
+            "platform": event.get_platform_name().upper(),
             "last_run": None,
             "created": datetime.now(china_tz).isoformat()
         }
