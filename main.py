@@ -121,7 +121,7 @@ class ZaskManager(Star):
         """统一消息发送方法"""
         try:
             platform = self.context.get_platform(task["platform"].lower())
-            message_type = MessageType.GROUP_MESSAGE if task["receiver_type"] == "group" else MessageType.PRIVATE_MESSAGE
+            message_type = "group" if task["receiver_type"] == "group" else "private"
         
             await platform.send_message(
                 receiver=task["receiver"],
