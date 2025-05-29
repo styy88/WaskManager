@@ -50,7 +50,7 @@ class ZaskManager(Star):
                     self.tasks = [
                         {**task, "task_id": task.get("task_id") or generate_task_id(task)}
                         for task in raw_tasks
-                        if self._validate_task(task)  # 新增任务校验
+                        if self._validate_task(task)
                     ]
                 logger.info(f"成功加载 {len(self.tasks)} 个有效定时任务")
         except Exception as e:
@@ -63,13 +63,13 @@ class ZaskManager(Star):
         return all(key in task for key in required_keys)
 
     def _save_tasks(self):
-        """安全保存任务数据（新增数据校验）"""
+        """安全保存任务数据"""
         valid_tasks = [task for task in self.tasks if self._validate_task(task)]
         with open(self.tasks_file, "w", encoding="utf-8") as f:
             json.dump(valid_tasks, f, indent=2, ensure_ascii=False)
 
     async def schedule_checker(self):
-        """定时任务检查器（增加错误处理）"""
+        """定时任务检查器"""
         logger.info("定时检查器启动")
         while True:
             try:
@@ -80,16 +80,19 @@ class ZaskManager(Star):
                 for task in self.tasks.copy():
                     if task["time"] == current_time and self._should_trigger(task, now):
                         await self._process_task(task, now)
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 logger.error(f"定时检查器错误: {str(e)}")
+                await asyncio.sleep(10)
 
     def _should_trigger(self, task: Dict, now: datetime) -> bool:
-        """判断是否应该触发任务（增加时区处理）"""
+        """判断是否应该触发任务"""
         last_run = datetime.fromisoformat(task["last_run"]).astimezone(china_tz) if task.get("last_run") else None
         return not last_run or (now - last_run).total_seconds() >= 86400
 
     async def _process_task(self, task: Dict, now: datetime):
-        """任务处理流程（封装为独立方法）"""
+        """任务处理流程"""
         try:
             output = await self._execute_script(task["script_name"])
             await self._send_task_result(task, output)
@@ -100,31 +103,19 @@ class ZaskManager(Star):
             await self._send_error_notice(task, str(e))
 
     async def _send_error_notice(self, task: Dict, error_msg: str):
-        """错误通知处理（适配旧版API）"""
+        """错误通知处理"""
         error_chain = [Plain(text=f"❌ 任务执行失败: {error_msg[:500]}")]
         await self._send_message(task, error_chain)
 
     async def _send_task_result(self, task: Dict, message: str):
-        """发送任务结果（适配旧版API）"""
+        """发送任务结果"""
         try:
-            # 使用普通列表构造消息链
             chain = [Plain(text=message[:2000])]
-            
-            # 构造统一消息来源
-            platform = task["platform"].upper()
-            msg_type = "GROUP_MESSAGE" if task["receiver_type"] == "group" else "PRIVATE_MESSAGE"
-            unified_msg_origin = f"{platform}:{msg_type}:{task['receiver']}"
-            
-            # 使用新版消息发送接口
-            await self.context.send_message(
-                unified_msg_origin=unified_msg_origin,
-                chain=chain  # 直接传递消息组件列表
-            )
-            logger.debug(f"消息已发送至 {unified_msg_origin}")
+            await self._send_message(task, chain)
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}")
-            raise RuntimeError("消息发送失败，请检查接收配置")
-            
+            raise
+
     async def _send_message(self, task: Dict, chain: list):
         """统一消息发送方法"""
         platform = task["platform"].upper()
@@ -138,7 +129,7 @@ class ZaskManager(Star):
         logger.debug(f"消息已发送至 {unified_msg_origin}")
 
     async def _execute_script(self, script_name: str) -> str:
-        """执行脚本文件（增加超时处理）"""
+        """执行脚本文件"""
         script_path = os.path.join(self.plugin_root, f"{script_name}.py")
         
         if not os.path.exists(script_path):
@@ -167,7 +158,7 @@ class ZaskManager(Star):
 
     @filter.command("定时")
     async def schedule_command(self, event: AstrMessageEvent):
-        """处理定时命令（优化参数解析）"""
+        """处理定时命令"""
         try:
             parts = event.message_str.split(maxsplit=3)
             if len(parts) < 2:
@@ -184,6 +175,7 @@ class ZaskManager(Star):
                 await self._show_help(event)
 
         except Exception as e:
+            event.stop_event()
             yield event.plain_result(f"❌ 错误: {str(e)}")
 
     async def _handle_add_command(self, event: AstrMessageEvent, parts: list):
@@ -205,22 +197,19 @@ class ZaskManager(Star):
             yield msg
 
     async def _add_task(self, event: AstrMessageEvent, name: str, time_str: str):
-        """添加定时任务（增加平台记录）"""
+        """添加定时任务"""
         if not re.fullmatch(r"^([01]\d|2[0-3]):([0-5]\d)$", time_str):
             raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
 
-        # 获取会话信息
         group_id = event.get_group_id()
         user_id = event.get_sender_id()
         platform = event.get_platform_name().upper()
 
-        # 脚本存在性检查
         script_path = os.path.join(self.plugin_root, f"{name}.py")
         if not os.path.exists(script_path):
             available = ", ".join(f.replace('.py', '') for f in os.listdir(self.plugin_root))
             raise FileNotFoundError(f"脚本不存在！可用脚本: {available or '无'}")
 
-        # 构建任务对象
         new_task = {
             "script_name": name,
             "time": time_str,
@@ -232,7 +221,6 @@ class ZaskManager(Star):
         }
         new_task["task_id"] = generate_task_id(new_task)
         
-        # 冲突检测
         if any(t["task_id"] == new_task["task_id"] for t in self.tasks):
             raise ValueError(f"该时段任务已存在（ID: {new_task['task_id']}）")
             
@@ -250,7 +238,7 @@ class ZaskManager(Star):
         yield event.plain_result(reply_msg)
 
     async def _delete_task(self, event: AstrMessageEvent, identifier: str):
-        """删除当前会话的任务（优化匹配逻辑）"""
+        """删除当前会话的任务"""
         group_id = event.get_group_id()
         receiver_type = "group" if group_id else "private"
         receiver = group_id if group_id else event.get_sender_id()
@@ -290,7 +278,7 @@ class ZaskManager(Star):
         yield event.plain_result("\n".join(report))
 
     async def _list_tasks(self, event: AstrMessageEvent):
-        """列出当前会话任务（显示平台信息）"""
+        """列出当前会话任务"""
         group_id = event.get_group_id()
         receiver_type = "group" if group_id else "private"
         receiver = group_id if group_id else event.get_sender_id()
@@ -331,8 +319,23 @@ class ZaskManager(Star):
             
         yield event.plain_result("\n".join(task_list))
 
+    @filter.command("执行")
+    async def execute_command(self, event: AstrMessageEvent):
+        """处理立即执行命令"""
+        try:
+            parts = event.message_str.split(maxsplit=1)
+            if len(parts) < 2:
+                raise ValueError("格式应为：/执行 [脚本名]")
+
+            script_name = parts[1].strip()
+            output = await self._execute_script(script_name)
+            yield event.plain_result(f"✅ 执行成功\n{output[:1500]}")
+        except Exception as e:
+            event.stop_event()
+            yield event.plain_result(f"❌ 执行错误: {str(e)}")
+
     async def _show_help(self, event: AstrMessageEvent):
-        """显示帮助信息（更新平台说明）"""
+        """显示帮助信息"""
         help_msg = """
 📘 定时任务插件使用指南（v3.5+）
 
