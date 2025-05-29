@@ -1,7 +1,7 @@
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
-from astrbot.api.message_components import Plain, Image, MessageChain
+from astrbot.api.message_components import Plain, Image
 import os
 import re
 import json
@@ -21,7 +21,7 @@ def generate_task_id(task: Dict) -> str:
 class ZaskManager(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
-        self.context = context  # 显式保存context引用
+        self.context = context
         self.config = config or {}
         
         # 路径配置
@@ -105,28 +105,25 @@ class ZaskManager(Star):
         await self._send_message(task, error_chain)
 
     async def _send_task_result(self, task: Dict, message: str):
-        """发送任务结果（适配最新API）"""
+        """发送任务结果（适配旧版API）"""
         try:
-            # 构造消息链
-            chain = MessageChain([Plain(text=message[:2000])])
-            await self._send_message(task, chain)
+            # 使用普通列表构造消息链
+            chain = [Plain(text=message[:2000])]
+            
+            # 构造统一消息来源
+            platform = task["platform"].upper()
+            msg_type = "GROUP_MESSAGE" if task["receiver_type"] == "group" else "PRIVATE_MESSAGE"
+            unified_msg_origin = f"{platform}:{msg_type}:{task['receiver']}"
+            
+            # 使用新版消息发送接口
+            await self.context.send_message(
+                unified_msg_origin=unified_msg_origin,
+                chain=chain  # 直接传递消息组件列表
+            )
+            logger.debug(f"消息已发送至 {unified_msg_origin}")
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}")
-            raise
-
-    async def _send_message(self, task: Dict, chain: MessageChain):
-        """统一消息发送方法"""
-        # 构造统一消息来源
-        platform = task["platform"].upper()
-        msg_type = "GROUP_MESSAGE" if task["receiver_type"] == "group" else "PRIVATE_MESSAGE"
-        unified_msg_origin = f"{platform}:{msg_type}:{task['receiver']}"
-        
-        # 使用最新消息发送接口
-        await self.context.send_message(
-            unified_msg_origin=unified_msg_origin,
-            chain=chain
-        )
-        logger.debug(f"消息已发送至 {unified_msg_origin}")
+            raise RuntimeError("消息发送失败，请检查接收配置")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行脚本文件（增加超时处理）"""
