@@ -127,12 +127,12 @@ class ZaskManager(Star):
                 await platform.send_group_message(
                     group_wxid=task["receiver"],
                     content=message
-                    )
-                else:
-                    await platform.send_private_message(
-                        user_wxid=task["receiver"],
-                        content=message
-                    )
+                )
+            else:
+                await platform.send_private_message(
+                    user_wxid=task["receiver"],
+                    content=message
+                )
             logger.debug(f"微信消息已发送至 {task['receiver']}")
         except Exception as e:
             logger.error(f"微信消息发送失败: {str(e)}")
