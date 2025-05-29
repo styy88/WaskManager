@@ -118,15 +118,16 @@ class ZaskManager(Star):
 
     async def _send_message(self, task: Dict, chain: list):
         """统一消息发送方法"""
-        platform = self.context.get_platform(task["platform"].lower())
-        message_type = MessageType.GROUP_MESSAGE if task["receiver_type"] == "group" else MessageType.PRIVATE_MESSAGE
+        try:
+            platform = self.context.get_platform(task["platform"].lower())
+            message_type = MessageType.GROUP_MESSAGE if task["receiver_type"] == "group" else MessageType.PRIVATE_MESSAGE
         
-        await platform.send_message(
-            receiver=task["receiver"],
-            message_type=message_type,
-            chain=chain
-        )
-        logger.debug(f"消息已发送至 {task['receiver']}")
+            await platform.send_message(
+                receiver=task["receiver"],
+                message_type=message_type,
+                chain=chain
+            )
+            logger.debug(f"消息已发送至 {task['receiver']}")
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}")
             raise RuntimeError(f"消息发送失败: {str(e)}")
