@@ -369,8 +369,11 @@ class ZaskManager(Star):
             if len(parts) < 2:
                 raise ValueError("格式应为：/执行 [脚本名]")
                 
-            output = await self._execute_script(parts[1])
-            yield event.plain_result(f"✅ 执行成功\n{output[:1500]}")
+            script_name = parts[1]
+            output = await self._execute_script(script_name)
+            
+            # 直接返回脚本输出，不加任何前缀
+            ield event.plain_result(output[:1500])
             
         except Exception as e:
             yield event.plain_result(f"❌ 错误: {str(e)}")
