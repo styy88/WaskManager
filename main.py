@@ -271,10 +271,11 @@ class ZaskManager(Star):
     async def _send_task_result(self, task: Dict, message: str) -> None:
         """使用 AstrBot 标准消息发送接口（unified_msg_origin + MessageChain）"""
         try:
+            # 如果消息为空则使用默认提示
+            if not message.strip():
+                message = f"脚本 {task['script_name']} 已执行完毕，但未输出任何内容"
+                
             # 构造消息链（纯文本，限制长度2000字符）
-            status_icon = "✅" if task["status"] == TASK_SUCCEEDED else "⚠️"
-            prefix = f"{status_icon} 定时任务执行结果 ({task['script_name']})\n"
-            full_message = prefix + message
             message_chain = MessageChain([Plain(text=full_message[:2000])])
             
             # 调用 AstrBot 上下文的标准发送方法：target + chain（位置参数）
@@ -282,7 +283,7 @@ class ZaskManager(Star):
                 task["unified_msg_origin"],  # 会话唯一标识作为 target
                 message_chain                # 消息链
             )
-            logger.debug("消息已成功发送到目标会话")
+            logger.debug(f"脚本 {task['script_name']} 的输出已成功发送")
         except Exception as e:
             logger.error(f"消息发送失败: {str(e)}，任务详情：{task}")
 
