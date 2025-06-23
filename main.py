@@ -139,7 +139,7 @@ class ZaskManager(Star):
 
     async def _check_stuck_tasks(self) -> None:
         """检查并恢复卡住的任务（超过5分钟未完成）"""
-        now = datetime.now(timezone(timedelta(hours=8)))
+        now = datetime.now(timezone(timedelta(harts=8)))
         stuck_tasks = []
         
         for task_id, start_time in self.running_tasks.items():
@@ -260,7 +260,7 @@ class ZaskManager(Star):
                 logger.info("任务监控器被取消")
                 break
             except Exception as e:
-                logger.error(f"任务监控器错误: {str(e)}")
+                logger.error(f"任务监控器错误: {极r(e)}")
                 await asyncio.sleep(300)
 
     def _should_trigger(self, task: Dict, now: datetime) -> bool:
@@ -274,9 +274,9 @@ class ZaskManager(Star):
             # 如果消息为空则使用默认提示
             if not message.strip():
                 message = f"脚本 {task['script_name']} 已执行完毕，但未输出任何内容"
-                
+            
             # 构造消息链（纯文本，限制长度2000字符）
-            message_chain = MessageChain([Plain(text=full_message[:2000])])
+            message_chain = MessageChain([Plain(text=message[:2000])])
             
             # 调用 AstrBot 上下文的标准发送方法：target + chain（位置参数）
             await self.context.send_message(
@@ -373,7 +373,7 @@ class ZaskManager(Star):
             output = await self._execute_script(script_name)
             
             # 直接返回脚本输出，不加任何前缀
-            ield event.plain_result(output[:1500])
+            yield event.plain_result(output[:1500])
             
         except Exception as e:
             yield event.plain_result(f"❌ 错误: {str(e)}")
