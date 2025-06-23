@@ -324,30 +324,6 @@ class ZaskManager(Star):
         except Exception as e:
             raise RuntimeError(f"执行错误: {str(e)}")
 
-    @filter
-    async def auto_execute_script(self, event: AstrMessageEvent) -> MessageEventResult:
-        """自动检测脚本名称并执行（仅当消息为脚本名称时）"""
-        try:
-            # 1. 只处理纯文本消息且非命令消息
-            if event.message_type != MessageType.TEXT or event.is_command:
-                return
-                
-            script_name = event.message_str.strip()
-            
-            # 2. 检查是否是存在的脚本
-            script_path = os.path.join(self.plugin_root, f"{script_name}.py")
-            if not os.path.exists(script_path):
-                return
-                
-            # 3. 立即执行脚本
-            output = await self._execute_script(script_name)
-            
-            # 4. 直接返回脚本输出
-            yield event.plain_result(output[:1500])
-            
-        except Exception as e:
-            logger.error(f"自动执行失败: {str(e)}")
-            
     @filter.command("定时")
     async def schedule_command(self, event: AstrMessageEvent) -> MessageEventResult:
         """处理「定时」指令（添加/删除/列出/帮助）"""
