@@ -361,6 +361,30 @@ class ZaskManager(Star):
         except Exception as e:
             yield event.plain_result(f"❌ 错误: {str(e)}")
 
+    @filter.text
+    async def auto_execute_script(self, event: AstrMessageEvent) -> MessageEventResult:
+        """自动检测脚本名称并执行（仅当消息为脚本名称时）"""
+        try:
+            # 1. 只处理纯文本消息
+            if not event.is_text_message:
+                return
+                
+            script_name = event.message_str.strip()
+            
+            # 2. 检查是否是存在的脚本
+            script_path = os.path.join(self.plugin_root, f"{script_name}.py")
+            if not os.path.exists(script_path):
+                return
+                
+            # 3. 立即执行脚本
+            output = await self._execute_script(script_name)
+            
+            # 4. 直接返回脚本输出
+            yield event.plain_result(output[:1500])
+            
+        except Exception as e:
+            logger.error(f"自动执行失败: {str(e)}")
+            
     @filter.command("执行")
     async def execute_command(self, event: AstrMessageEvent) -> MessageEventResult:
         """处理「执行」指令（立即运行脚本）"""
