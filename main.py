@@ -139,7 +139,7 @@ class ZaskManager(Star):
 
     async def _check_stuck_tasks(self) -> None:
         """检查并恢复卡住的任务（超过5分钟未完成）"""
-        now = datetime.now(timezone(timedelta(harts=8)))
+        now = datetime.now(timezone(timedelta(hours=8)))
         stuck_tasks = []
         
         for task_id, start_time in self.running_tasks.items():
