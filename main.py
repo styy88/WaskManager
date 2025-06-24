@@ -2,7 +2,6 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, Mess
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain
-from astrbot.api.platform import MessageType
 from datetime import datetime, timedelta, timezone
 import os
 import re
@@ -11,6 +10,9 @@ import asyncio
 import subprocess
 from typing import List, Dict, Optional
 
+# 时区配置（确保整个系统使用统一时区）
+CHINA_TZ = timezone(timedelta(hours=8))
+
 # 任务执行状态常量
 TASK_PENDING = "pending"
 TASK_RUNNING = "running"
@@ -18,12 +20,12 @@ TASK_FAILED = "failed"
 TASK_SUCCEEDED = "succeeded"
 
 def generate_task_id(task: Dict) -> str:
-    """基于「平台+消息类型+会话ID+脚本名+时间」生成唯一任务标识"""
+    """基于平台+消息类型+会话ID+脚本名+时间生成唯一ID"""
     platform, msg_type, session_id = task["unified_msg_origin"].split(':', 2)
-    return f"{task['script_name']}_{task['time'].replace(':', '')}_{session_id}"
+    script_name = re.sub(r'[^\w]', '_', task["script_name"])[:20]
+    return f"{script_name}_{task['time'].replace(':', '')}_{session_id[:10]}"
 
-
-@register("ZaskManager", "xiaoxin", "全功能定时任务插件", "3.6", "https://github.com/styy88/ZaskManager")
+@register("ZaskManager", "xiaoxin", "全功能定时任务插件", "4.1", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
@@ -40,61 +42,86 @@ class ZaskManager(Star):
         )
         self.tasks_file = os.path.join(self.plugin_root, "tasks.json")
         os.makedirs(self.plugin_root, exist_ok=True)
-        logger.debug(f"插件数据目录初始化完成: {self.plugin_root}")
 
         self.tasks: List[Dict] = []
-        self._load_tasks()  # 加载历史任务
+        self._load_tasks()
         
-        # 任务执行状态锁和监控
+        # 状态管理
         self.task_locks = {}  # 任务ID: 锁对象
         self.running_tasks = {}  # 任务ID: 任务开始时间
+        self.missed_tasks = []  # 需要补偿执行的任务
         
         # 启动定时器
         self.schedule_checker_task = asyncio.create_task(self.schedule_checker())
         self.task_monitor_task = asyncio.create_task(self.task_monitor())
+        self.missed_task_task = asyncio.create_task(self.missed_task_handler())
 
     def _load_tasks(self) -> None:
-        """安全加载任务（过滤旧格式数据，确保含 unified_msg_origin）"""
+        """安全加载任务"""
         try:
-            if not os.path.exists(self.plugin_root):
-                os.makedirs(self.plugin_root, exist_ok=True)
-                logger.warning(f"自动创建缺失目录: {self.plugin_root}")
-            
             if os.path.exists(self.tasks_file):
                 with open(self.tasks_file, "r", encoding="utf-8") as f:
                     raw_tasks = json.load(f)
-                    self.tasks = [
-                        {
-                            **task, 
-                            "task_id": task.get("task_id") or generate_task_id(task),
+                    
+                    # 迁移和修复任务数据
+                    self.tasks = []
+                    for task in raw_tasks:
+                        if "unified_msg_origin" not in task:
+                            continue
+                            
+                        # 修复时间字段
+                        for time_field in ["last_run", "last_attempt", "created"]:
+                            if task.get(time_field) and isinstance(task[time_field], str):
+                                try:
+                                    # 解析为带时区的datetime对象
+                                    dt = datetime.fromisoformat(task[time_field])
+                                    if dt.tzinfo is None:
+                                        dt = dt.replace(tzinfo=CHINA_TZ)
+                                    task[time_field] = dt.astimezone(CHINA_TZ)
+                                except:
+                                    task[time_field] = None
+                        
+                        # 生成任务ID
+                        task_id = generate_task_id(task)
+                            
+                        # 验证并标准化任务
+                        self.tasks.append({
+                            "task_id": task_id,
+                            "script_name": task["script_name"],
+                            "time": task["time"],
+                            "unified_msg_origin": task["unified_msg_origin"],
                             "status": task.get("status", TASK_PENDING),
                             "last_run": task.get("last_run"),
                             "last_attempt": task.get("last_attempt"),
                             "retry_count": task.get("retry_count", 0),
-                        }
-                        for task in raw_tasks
-                        if "unified_msg_origin" in task  # 仅加载新格式任务
-                    ]
+                            "created": task.get("created") or datetime.now(CHINA_TZ)
+                        })
+                    
                 logger.info(f"成功加载 {len(self.tasks)} 个有效任务")
             else:
                 self.tasks = []
                 logger.info("任务文件不存在，已初始化空任务列表")
+                
+            # 立即保存修复后的数据
+            self._save_tasks()
         except Exception as e:
             logger.error(f"任务加载失败: {str(e)}")
             self.tasks = []
 
     def _save_tasks(self) -> None:
-        """安全保存任务到本地文件"""
+        """安全保存任务，时间字段转为字符串"""
         try:
             with open(self.tasks_file, "w", encoding="utf-8") as f:
-                tasks_to_save = [
-                    {
-                        k: v 
-                        for k, v in task.items() 
-                        if k not in ["lock", "_runtime"]
-                    }
-                    for task in self.tasks
-                ]
+                tasks_to_save = []
+                for task in self.tasks:
+                    # 复制任务数据，转换时间对象
+                    save_task = task.copy()
+                    for field in ["last_run", "last_attempt", "created"]:
+                        if save_task.get(field) and isinstance(save_task[field], datetime):
+                            save_task[field] = save_task[field].isoformat()
+                    
+                    tasks_to_save.append(save_task)
+                
                 json.dump(tasks_to_save, f, indent=2, ensure_ascii=False)
             logger.debug("任务数据已持久化")
         except Exception as e:
@@ -105,48 +132,115 @@ class ZaskManager(Star):
         logger.info("定时检查器启动")
         while True:
             try:
-                await asyncio.sleep(30 - datetime.now().second % 30)  # 每30秒对齐检查
-                now = datetime.now(timezone(timedelta(hours=8)))  # UTC+8 时区
+                await asyncio.sleep(30 - datetime.now().second % 30)
+                now = datetime.now(CHINA_TZ)
                 current_time = now.strftime("%H:%M")
+                today = now.date()
                 
                 for task in self.tasks.copy():
-                    if (
-                        task["status"] == TASK_PENDING and 
-                        task["time"] == current_time and 
-                        self._should_trigger(task, now)
-                    ):
+                    if task["status"] not in [TASK_PENDING, TASK_FAILED]:
+                        continue
+                        
+                    if task["time"] != current_time:
+                        continue
+                        
+                    # 检查是否需要触发
+                    if not task.get("last_run") or task["last_run"].date() != today:
                         task_id = task["task_id"]
                         
                         # 创建锁对象（如果不存在）
                         if task_id not in self.task_locks:
                             self.task_locks[task_id] = asyncio.Lock()
                         
-                        # 尝试获取锁
+                        # 尝试获取锁（防止重复执行）
                         if not self.task_locks[task_id].locked():
                             asyncio.create_task(self._execute_task_with_lock(task, now))
                         else:
                             logger.warning(f"任务 {task_id} 已在执行中，跳过重复触发")
+                    else:
+                        logger.debug(f"任务 {task['task_id']} 今天已执行过，跳过")
                 
-                # 检查卡住的任务
-                await self._check_stuck_tasks()
+                # 每小时检查一次卡住的任务
+                if now.minute == 0:
+                    await self._check_stuck_tasks()
                 
             except asyncio.CancelledError:
                 logger.info("定时检查器被取消")
                 break
             except Exception as e:
                 logger.error(f"定时检查器错误: {str(e)}")
-                await asyncio.sleep(10)  # 出错时稍作等待
+                await asyncio.sleep(10)
+
+    async def missed_task_handler(self) -> None:
+        """补偿未执行任务处理器（每30秒检查一次）"""
+        logger.info("补偿执行任务启动")
+        while True:
+            try:
+                await asyncio.sleep(30)
+                now = datetime.now(CHINA_TZ)
+                today = now.date()
+                
+                # 检查每个任务是否错过执行
+                for task in self.tasks.copy():
+                    if task["status"] in [TASK_RUNNING, TASK_SUCCEEDED]:
+                        continue
+                        
+                    # 解析任务时间
+                    try:
+                        hour, minute = map(int, task["time"].split(":"))
+                        task_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    except Exception:
+                        continue
+                    
+                    # 检查任务是否应该在今天执行
+                    if task.get("last_run") and task["last_run"].date() == today:
+                        continue  # 今天已执行过
+                    
+                    # 计算时间差（任务时间与当前时间）
+                    time_diff = (now - task_time).total_seconds()
+                    
+                    # 条件1：过了任务时间30秒以上
+                    # 条件2：任务本应执行但未执行
+                    if 30 < time_diff < 86400:  # 在一天内的时间窗口
+                        task_id = task["task_id"]
+                        
+                        # 确保任务不在运行中
+                        if task_id in self.running_tasks:
+                            continue
+                            
+                        # 确保没有锁占用
+                        if task_id not in self.task_locks:
+                            self.task_locks[task_id] = asyncio.Lock()
+                            
+                        if not self.task_locks[task_id].locked():
+                            logger.warning(f"检测到任务 {task_id} 可能错过执行，尝试补偿执行")
+                            asyncio.create_task(self._execute_task_with_lock(task, now))
+                
+                # 清理已完成的任务
+                if self.missed_tasks:
+                    for task_id in self.missed_tasks.copy():
+                        task = next((t for t in self.tasks if t["task_id"] == task_id), None)
+                        if task and task["status"] == TASK_SUCCEEDED:
+                            self.missed_tasks.remove(task_id)
+                    logger.debug(f"清理后待补偿任务数: {len(self.missed_tasks)}")
+                
+            except asyncio.CancelledError:
+                logger.info("补偿执行任务被取消")
+                break
+            except Exception as e:
+                logger.error(f"补偿执行任务错误: {str(e)}")
+                await asyncio.sleep(30)
 
     async def _check_stuck_tasks(self) -> None:
         """检查并恢复卡住的任务（超过5分钟未完成）"""
-        now = datetime.now(timezone(timedelta(hours=8)))
+        now = datetime.now(CHINA_TZ)
         stuck_tasks = []
         
         for task_id, start_time in self.running_tasks.items():
             if (now - start_time).total_seconds() > 300:  # 超过5分钟
                 task = next((t for t in self.tasks if t["task_id"] == task_id), None)
                 if task:
-                    logger.warning(f"检测到卡住的任务: {task_id} (已运行超过5分钟)")
+                    logger.warning(f"检测到卡住的任务: {task_id}")
                     stuck_tasks.append(task_id)
         
         # 移除并重试卡住的任务
@@ -158,6 +252,9 @@ class ZaskManager(Star):
                 task["retry_count"] += 1
                 logger.warning(f"任务 {task_id} 被标记为失败 (卡住)")
                 self._save_tasks()
+                
+                # 添加到补偿列表
+                self.missed_tasks.append(task_id)
 
     async def _execute_task_with_lock(self, task: Dict, now: datetime) -> None:
         """带锁执行任务（防止并发）"""
@@ -168,87 +265,106 @@ class ZaskManager(Star):
             try:
                 # 更新任务状态
                 task["status"] = TASK_RUNNING
-                task["last_attempt"] = now.isoformat()
+                task["last_attempt"] = now
                 self.running_tasks[task_id] = now
                 
                 # 执行脚本
-                output = await self._execute_script(task["script_name"])
+                script_name = task["script_name"]
+                logger.info(f"执行脚本: {script_name}")
+                
+                # 创建脚本执行路径
+                script_path = os.path.join(self.plugin_root, f"{script_name}.py")
+                
+                # 执行脚本（带超时处理）
+                proc = await asyncio.create_subprocess_exec(
+                    "python", script_path,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                
+                try:
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+                except asyncio.TimeoutError:
+                    # 处理超时
+                    proc.kill()
+                    await proc.communicate()  # 清理残留
+                    raise TimeoutError("执行超时（30秒限制）")
+                
+                # 检查返回码
+                if proc.returncode != 0:
+                    error_msg = stderr.decode("utf-8", errors="replace")[:500]
+                    raise RuntimeError(f"执行失败（代码{proc.returncode}）: {error_msg}")
+                
+                output = stdout.decode("utf-8", errors="replace")
+                
+                # 发送结果
                 await self._send_task_result(task, output)
                 
                 # 更新状态
-                task["last_run"] = now.isoformat()
+                task["last_run"] = now
                 task["status"] = TASK_SUCCEEDED
                 task["retry_count"] = 0
+                
+                # 如果是从补偿列表执行的，移除它
+                if task_id in self.missed_tasks:
+                    self.missed_tasks.remove(task_id)
                 
             except Exception as e:
                 logger.error(f"任务执行失败: {str(e)}")
                 task["status"] = TASK_FAILED
-                task["retry_count"] += 1
+                task["retry_count"] = min(task.get("retry_count", 0) + 1, 3)
                 
-                # 自动重试机制（最多重试2次）
-                if task["retry_count"] <= 2:
-                    retry_seconds = task["retry_count"] * 60  # 1分钟、2分钟
-                    logger.info(f"任务 {task_id} 将在 {retry_seconds} 秒后重试...")
-                    await self._schedule_retry(task, retry_seconds)
+                # 添加到补偿列表（最多重试3次）
+                if task["retry_count"] <= 3 and task_id not in self.missed_tasks:
+                    self.missed_tasks.append(task_id)
                     
             finally:
                 # 清理状态
                 self.running_tasks.pop(task_id, None)
                 self._save_tasks()
-                
-                # 保留锁对象以用于状态检查
-                await asyncio.sleep(1)  # 防止任务完成时立即重入
-
-    async def _schedule_retry(self, task: Dict, delay_seconds: int) -> None:
-        """调度任务重试"""
-        await asyncio.sleep(delay_seconds)
-        
-        # 检查任务是否仍需要重试
-        task_id = task["task_id"]
-        current_task = next((t for t in self.tasks if t["task_id"] == task_id), None)
-        
-        if current_task and current_task["status"] == TASK_FAILED:
-            current_task["status"] = TASK_PENDING
-            self._save_tasks()
-            logger.info(f"任务 {task_id} 已重新加入队列等待执行")
 
     async def task_monitor(self) -> None:
-        """任务状态监控器（每小时检查一次）"""
+        """任务状态监控器（每6小时检查一次）"""
         logger.info("任务状态监控器启动")
         while True:
             try:
-                await asyncio.sleep(3600)  # 每小时检查一次
-                now = datetime.now(timezone(timedelta(hours=8)))
+                await asyncio.sleep(21600)  # 6小时
+                now = datetime.now(CHINA_TZ)
                 
-                # 检查未执行的任务（连续3次未执行）
-                failed_tasks = [
-                    task for task in self.tasks
-                    if task["status"] == TASK_FAILED and task["retry_count"] >= 3
-                ]
-                
-                # 检查超过24小时未成功的任务
+                # 检查未执行的任务（连续3次失败）
+                failed_tasks = []
                 stale_tasks = []
+                
                 for task in self.tasks:
-                    last_success = task.get("last_run")
-                    if last_success:
-                        last_run = datetime.fromisoformat(last_success)
-                        if (now - last_run).total_seconds() > 86400:  # 24小时
+                    # 检查失败任务
+                    if task["status"] == TASK_FAILED and task["retry_count"] >= 3:
+                        failed_tasks.append(task)
+                    
+                    # 检查陈旧任务（超过24小时未成功）
+                    last_run = task.get("last_run")
+                    if last_run:
+                        time_diff = (now - last_run).total_seconds()
+                        if time_diff > 86400:
                             stale_tasks.append(task)
                 
                 # 报告异常状态
                 if failed_tasks or stale_tasks:
-                    report = ["⚠️ 定时任务系统警告"]
+                    report = ["⚠️ 定时任务系统监控报告"]
+                    
                     if failed_tasks:
                         report.append("连续失败的任务:")
                         for task in failed_tasks:
-                            report.append(f"· {task['task_id']} ({task['script_name']})")
+                            last_attempt = task.get("last_attempt")
+                            last_run_time = last_attempt.strftime("%m-%d %H:%M") if last_attempt else "从未尝试"
+                            report.append(f"· {task['script_name']} ({task['time']}) 最后尝试: {last_run_time}")
+                    
                     if stale_tasks:
                         report.append("超过24小时未成功执行的任务:")
                         for task in stale_tasks:
-                            last_run = datetime.fromisoformat(task['last_run'])
-                            report.append(f"· {task['task_id']} (最后成功执行: {last_run.strftime('%Y-%m-%d %H:%M')})")
+                            last_run_time = task['last_run'].strftime("%Y-%m-%d %H:%M") if task.get("last_run") else "从未成功"
+                            report.append(f"· {task['script_name']} ({task['time']}) 最后成功执行: {last_run_time}")
                     
-                    # 发给第一个可用会话（开发者警告）
+                    # 发给第一个任务所属的会话
                     if self.tasks:
                         first_task = self.tasks[0]
                         await self.context.send_message(
@@ -260,32 +376,22 @@ class ZaskManager(Star):
                 logger.info("任务监控器被取消")
                 break
             except Exception as e:
-                logger.error(f"任务监控器错误: {极r(e)}")
-                await asyncio.sleep(300)
-
-    def _should_trigger(self, task: Dict, now: datetime) -> bool:
-        """判断任务是否应触发（每日一次）"""
-        last_run = datetime.fromisoformat(task["last_run"]) if task.get("last_run") else None
-        return not last_run or (now - last_run).total_seconds() >= 86400  # 24小时间隔
+                logger.error(f"任务监控器错误: {str(e)}")
+                await asyncio.sleep(3600)
 
     async def _send_task_result(self, task: Dict, message: str) -> None:
-        """使用 AstrBot 标准消息发送接口（unified_msg_origin + MessageChain）"""
+        """发送任务结果"""
         try:
-            # 如果消息为空则使用默认提示
             if not message.strip():
-                message = f"脚本 {task['script_name']} 已执行完毕，但未输出任何内容"
-            
-            # 构造消息链（纯文本，限制长度2000字符）
+                message = f"✅ 脚本 {task['script_name']} 已执行，无输出"
+                
             message_chain = MessageChain([Plain(text=message[:2000])])
-            
-            # 调用 AstrBot 上下文的标准发送方法：target + chain（位置参数）
             await self.context.send_message(
-                task["unified_msg_origin"],  # 会话唯一标识作为 target
-                message_chain                # 消息链
+                task["unified_msg_origin"],
+                message_chain
             )
-            logger.debug(f"脚本 {task['script_name']} 的输出已成功发送")
         except Exception as e:
-            logger.error(f"消息发送失败: {str(e)}，任务详情：{task}")
+            logger.error(f"消息发送失败: {str(e)}")
 
     async def _execute_script(self, script_name: str) -> str:
         """执行指定Python脚本（带超时/错误处理）"""
@@ -643,5 +749,12 @@ class ZaskManager(Star):
                 await self.task_monitor_task
             except asyncio.CancelledError:
                 logger.info("任务监控器已取消")
+                
+        if hasattr(self, "missed_task_task"):
+            self.missed_task_task.cancel()
+            try:
+                await self.missed_task_task
+            except asyncio.CancelledError:
+                logger.info("补偿任务处理器已取消")
                 
         logger.info("插件终止完成")
