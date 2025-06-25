@@ -365,7 +365,7 @@ class ZaskManager(Star):
         """发送任务结果"""
         try:
             if not message.strip():
-                message = f"✅ 脚本 {task['script_name']} 执行成功，无内容输出"
+                message = "✅ 定时任务执行完毕（无输出）"
                 
             # 添加任务信息前缀
             result_text = f"⏰ 定时任务报告\n🖥️ {task['script_name']}\n➡️ 输出内容:\n{message}"
@@ -374,7 +374,7 @@ class ZaskManager(Star):
             if len(result_text) > 1500:
                 result_text = result_text[:1400] + "... [输出过长被截断]"
                 
-            message_chain = MessageChain([Plain(text=result_text)])
+            message_chain = MessageChain([Plain(text=message)])
             await self.context.send_message(
                 task["unified_msg_origin"],
                 message_chain
@@ -442,7 +442,7 @@ class ZaskManager(Star):
             if len(result) > 1500:
                 result = result[:1400] + "... [输出过长被截断]"
                 
-            yield event.plain_result(f"🖥️ {script_name} 执行结果:\n{result}")
+            yield event.plain_result(result)
             
         except Exception as e:
             yield event.plain_result(f"❌ 脚本执行失败: {str(e)}")
