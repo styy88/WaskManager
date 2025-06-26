@@ -663,7 +663,7 @@ class ZaskManager(Star):
     async def _show_help(self, event: AstrMessageEvent) -> MessageEventResult:
         """显示帮助信息"""
         help_msg = """
-📘 定时任务插件使用指南 V5.1 (稳定版)
+📘 定时任务插件使用指南 V4.1 (稳定版)
 
 【命令列表】
 /定时 添加 [脚本名] [时间] - 创建每日定时任务（脚本需放在 plugin_data/ZaskManager 下）
