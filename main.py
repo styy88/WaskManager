@@ -211,7 +211,7 @@ class ZaskManager(Star):
                 ]
                 
                 # 报告错过的任务
-                if missed极asks:
+                if missed_tasks:
                     report = []
                     
                     for task in missed_tasks:
@@ -669,7 +669,7 @@ class ZaskManager(Star):
 /定时 添加 [脚本名] [时间] - 创建每日定时任务（脚本需放在 plugin_data/ZaskManager 下）
 /定时 删除 [任务ID或名称] - 删除当前会话的任务
 /定时 列出 - 查看当前会话的所有任务
-/定时 状态 [任务极 查看任务详细执行状态
+/定时 状态 [任务ID] - 查看任务详细执行状态
 /定时 帮助 - 显示本帮助信息
 /执行 [脚本名] - 立即执行脚本并返回结果
 
