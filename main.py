@@ -210,46 +210,15 @@ class ZaskManager(Star):
                     (not task.get("last_run") or safe_datetime(task["last_run"]) < today_start)
                 ]
                 
-                # 报告错过的任务
+                # 只在日志中记录错过的任务，不发送消息
                 if missed_tasks:
-                    report = []
+                    logger.warning(f"发现 {len(missed_tasks)} 个未执行的任务")
                     
-                    for task in missed_tasks:
-                        # 获取任务时间对象
-                        task_time_dt = safe_datetime(task.get("last_run"))
-                        
-                        # 格式化状态信息
-                        status = task["status"]
-                        if status == TASK_RUNNING:
-                            status = "运行中"
-                        elif status == TASK_FAILED:
-                            status = f"失败({task.get('retry_count',0)}次)"
-                        else:
-                            status = "待执行"
-                            
-                        # 格式化最后执行时间
-                        last_run = task_time_dt.strftime("%Y-%m-%d %H:%M") if task_time_dt else "从未执行"
-                        
-                        # 获取任务标识
-                        task_ident = task["task_id"][:15]
-                        
-                        report.append(f"• [{status}] {task['script_name']} - {last_run} ({task_ident})")
-                    
-                    # 只显示前5个错过的任务避免过长
-                    if len(report) > 5:
-                        report = report[:5] + [f"... 共{len(missed_tasks)}个任务错过执行"]
-                    
-                    # 构造消息
-                    now_str = now.strftime("%Y-%m-%d %H:%M")
-                    message = f"⚠️ 定时任务状态监控\n⏰ 系统时间: {now_str}\n📋 今日未成功执行的任务:\n" + "\n".join(report)
-                    
-                    # 发给第一个任务所属的会话
-                    if self.tasks:
-                        first_task = self.tasks[0]
-                        await self.context.send_message(
-                            first_task["unified_msg_origin"],
-                            MessageChain([Plain(text=message)])
-                        )
+                    # 记录详细任务信息（仅限调试用途）
+                    for task in missed_tasks[:3]:  # 只记录前3个避免过多
+                        last_run = safe_datetime(task.get("last_run"))
+                        last_run_str = last_run.strftime("%Y-%m-%d %H:%M") if last_run else "从未执行"
+                        logger.debug(f"未执行任务: ID={task['task_id']}, 脚本={task['script_name']}, 最后执行={last_run_str}")
                 
             except asyncio.CancelledError:
                 logger.info("任务监控器被取消")
