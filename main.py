@@ -197,7 +197,7 @@ class ZaskManager(Star):
             logger.error(f"任务保存失败: {str(e)}")
 
     async def _schedule_checker(self) -> None:
-        """定时任务检查器（每秒检查一次）""" 
+        """定时任务检查器（每秒检查一次）"""
         logger.info("定时检查器启动（每秒检查一次）")
         while True:
             try:
@@ -226,8 +226,9 @@ class ZaskManager(Star):
                     
                     logger.info(f"日期变更，已重置 {reset_count} 个任务状态")
                 
-                # 当前时间格式化为 HH:MM
-                current_hour_min = now.strftime("%H:%M")
+                # 获取当前时间的小时和分钟
+                current_hour = now.hour
+                current_minute = now.minute
                 
                 # 遍历所有任务
                 for task in self.tasks:
@@ -240,50 +241,20 @@ class ZaskManager(Star):
                     # 检查状态是否适合执行
                     if task["status"] not in [TASK_PENDING, TASK_FAILED]:
                         continue
-                        
-                    # 获取任务时间并规范化为 HH:MM 格式
-                    task_time = task["time"]
                     
-                    # 跳过无效时间格式
-                    if not isinstance(task_time, str):
-                        logger.warning(f"任务 {task_id} 时间格式无效")
+                    # 解析任务时间
+                    task_time_str = task["time"]
+                    parsed_time = self._parse_task_time(task_time_str)
+                    
+                    if not parsed_time:
+                        logger.warning(f"任务 {task_id} 时间格式无效: {task_time_str}")
                         continue
                     
-                    # 尝试标准化时间格式
-                    normalized_time = None
-                    try:
-                        # HH:MM 格式
-                        if ':' in task_time and len(task_time) == 5:
-                            parts = task_time.split(':')
-                            hour = int(parts[0])
-                            minute = int(parts[1])
-                            if 0 <= hour < 24 and 0 <= minute < 60:
-                                normalized_time = task_time
-                        # HHMM 格式
-                        elif len(task_time) == 4 and task_time.isdigit():
-                            hour = int(task_time[:2])
-                            minute = int(task_time[2:])
-                            if 0 <= hour < 24 and 0 <= minute < 60:
-                                normalized_time = f"{hour:02d}:{minute:02d}"
-                    except:
-                        pass
+                    task_hour, task_minute = parsed_time
                     
-                    if not normalized_time:
-                        logger.warning(f"任务 {task_id} 时间格式无效: {task_time}")
+                    # 核心修复：只有当小时和分钟完全匹配时才执行
+                    if current_hour != task_hour or current_minute != task_minute:
                         continue
-                    
-                    # 比较当前时间与任务时间（允许1分钟的时间窗口）
-                    if current_hour_min != normalized_time:
-                        # 计算时间差
-                        try:
-                            now_minutes = int(current_hour_min[:2]) * 60 + int(current_hour_min[3:5])
-                            target_minutes = int(normalized_time[:2]) * 60 + int(normalized_time[3:5])
-                            time_diff = abs(now_minutes - target_minutes)
-                            if time_diff > 1:  # 超过1分钟就不执行
-                                continue
-                        except Exception as e:
-                            logger.error(f"计算时间差失败: {e}")
-                            continue
                     
                     # 获取任务锁
                     if task_id not in self.task_locks:
@@ -291,7 +262,7 @@ class ZaskManager(Star):
                         
                     # 尝试执行任务
                     if not self.task_locks[task_id].locked():
-                        logger.info(f"符合执行条件: {task_id} [{current_hour_min}]")
+                        logger.info(f"符合执行条件: {task_id} [任务时间 {task_hour:02d}:{task_minute:02d}, 当前时间 {current_hour:02d}:{current_minute:02d}]")
                         asyncio.create_task(self._execute_task_with_lock(task, now))
                     else:
                         logger.warning(f"任务 {task_id} 已在执行中，跳过重复触发")
@@ -302,7 +273,40 @@ class ZaskManager(Star):
             except Exception as e:
                 logger.error(f"定时检查器错误: {str(e)}")
                 await asyncio.sleep(10)
+    
+    def _parse_task_time(self, time_str: str) -> Optional[tuple]:
+        """解析任务时间字符串为(小时, 分钟)元组"""
+        try:
+            # 处理冒号格式 (HH:MM)
+            if ':' in time_str:
+                parts = time_str.split(':')
+                if len(parts) == 2:
+                    hour = int(parts[0])
+                    minute = int(parts[1])
+                    if 0 <= hour < 24 and 0 <= minute < 60:
+                        return (hour, minute)
+            
+            # 处理连字符格式 (HHMM)
+            elif len(time_str) == 4 and time_str.isdigit():
+                hour = int(time_str[:2])
+                minute = int(time_str[2:])
+                if 0 <= hour < 24 and 0 <= minute < 60:
+                    return (hour, minute)
+            
+            # 处理3位数的格式 (HMM)
+            elif len(time_str) == 3 and time_str.isdigit():
+                hour = int(time_str[0])
+                minute = int(time_str[1:])
+                if 0 <= hour < 24 and 0 <= minute < 60:
+                    return (hour, minute)
+        
+        except (ValueError, TypeError):
+            pass
+        
+        # 格式无效
+        return None
 
+    # ... 其余代码保持不变，从 _task_monitor 开始往下 ...
     async def _task_monitor(self) -> None:
         """任务状态监控器（每6小时检查一次）"""
         logger.info("任务状态监控器启动")
@@ -839,6 +843,7 @@ class ZaskManager(Star):
 ✓ 支持多日任务自动重置
 ✓ 增强日期变更检测机制
 ✓ 执行记录持久化存储
+✓ 修复提前执行的定时问题
 
 【示例】
 /定时 添加 数据备份 08:30
@@ -850,6 +855,7 @@ class ZaskManager(Star):
 - 脚本执行超时60秒自动终止
 - 仅当前会话的任务可管理
 - 每日0点自动重置所有任务状态
+- 任务精确到分钟执行
         """.strip()
         yield event.plain_result(help_msg)
 
