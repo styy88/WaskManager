@@ -2,13 +2,13 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult, Mess
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.api.message_components import Plain
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 import os
 import re
 import json
 import asyncio
 import subprocess
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, Tuple
 
 # 北京时间时区 (UTC+8)
 CHINA_TZ = timezone(timedelta(hours=8))
@@ -48,7 +48,7 @@ def safe_datetime(dt: any) -> Optional[datetime]:
     except:
         return None
 
-@register("ZaskManager", "xiaoxin", "全功能定时任务插件", "5.0.4", "https://github.com/styy88/ZaskManager")
+@register("ZaskManager", "xiaoxin", "全功能定时任务插件", "5.0.5", "https://github.com/styy88/ZaskManager")
 class ZaskManager(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -75,7 +75,13 @@ class ZaskManager(Star):
         
         # 加载持久化执行记录
         self.today_tasks_executed = self._load_executed_tasks()
-        self.last_check_day = datetime.now(CHINA_TZ).date()  # 上次检查的日期
+        
+        # 关键修复：使用无时区日期对象进行比较
+        self.last_check_day = date.today()
+        logger.info(f"插件初始化完成，当前日期: {self.last_check_day}")
+        
+        # 启动前状态校验
+        self._validate_task_states()
         
         # 启动定时器
         self.schedule_checker_task = asyncio.create_task(self._schedule_checker())
@@ -107,6 +113,47 @@ class ZaskManager(Star):
             logger.debug("执行记录已持久化")
         except Exception as e:
             logger.error(f"执行记录保存失败: {str(e)}")
+
+    def _validate_task_states(self):
+        """插件启动时验证任务状态一致性"""
+        logger.info("开始任务状态校验...")
+        today = date.today()
+        
+        # 跟踪修复的任务数量
+        fixed_count = 0
+        
+        for task in self.tasks:
+            task_id = task["task_id"]
+            
+            # 校验成功状态的任务是否属于今天
+            if task["status"] == TASK_SUCCEEDED:
+                last_run = safe_datetime(task.get("last_run"))
+                
+                if not last_run or last_run.date() < today:
+                    # 成功状态但最后执行时间早于今天
+                    logger.warning(f"状态异常: 任务 {task_id} 状态=成功但最后执行时间早于今天")
+                    task["status"] = TASK_PENDING
+                    fixed_count += 1
+                    continue
+                
+                # 校验是否在今日执行记录中
+                if task_id not in self.today_tasks_executed:
+                    logger.warning(f"状态异常: 任务 {task_id} 状态=成功但不在今日执行记录中")
+                    self.today_tasks_executed.add(task_id)
+                    self._save_executed_tasks()
+                    fixed_count += 1
+            
+            # 校验是否在今日执行记录中但状态不是成功
+            elif task_id in self.today_tasks_executed:
+                logger.warning(f"状态异常: 任务 {task_id} 在今日执行记录中但状态={task['status']}")
+                task["status"] = TASK_SUCCEEDED
+                fixed_count += 1
+        
+        if fixed_count > 0:
+            logger.info(f"任务状态校验完成，修复了 {fixed_count} 个异常状态")
+            self._save_tasks()
+        else:
+            logger.info("任务状态校验完成，未发现异常状态")
 
     def _load_tasks(self) -> None:
         """安全加载任务，兼容所有时间格式"""
@@ -205,11 +252,17 @@ class ZaskManager(Star):
                 await asyncio.sleep(1)
                 
                 now = datetime.now(CHINA_TZ)
-                current_date = now.date()
+                # 关键修复：使用无时区日期对象进行比较
+                current_date = date.today()
                 
                 # 检查日期是否变更
                 if self.last_check_day != current_date:
                     logger.info(f"日期变更：{self.last_check_day} -> {current_date}")
+                    
+                    # 记录重置前状态
+                    status_count = {s: 0 for s in [TASK_PENDING, TASK_RUNNING, TASK_FAILED, TASK_SUCCEEDED]}
+                    for task in self.tasks:
+                        status_count[task["status"]] += 1
                     
                     # 日期变更 - 重置所有非运行状态的任务
                     reset_count = 0
@@ -224,7 +277,18 @@ class ZaskManager(Star):
                     self._save_executed_tasks()
                     self.last_check_day = current_date
                     
-                    logger.info(f"日期变更，已重置 {reset_count} 个任务状态")
+                    # 记录重置后状态
+                    new_status_count = {s: 0 for s in [TASK_PENDING, TASK_RUNNING, TASK_FAILED, TASK_SUCCEEDED]}
+                    for task in self.tasks:
+                        new_status_count[task["status"]] += 1
+                    
+                    logger.info(
+                        f"日期变更，已重置 {reset_count} 个任务状态\n"
+                        f"重置前状态: 待触发={status_count[TASK_PENDING]} 运行中={status_count[TASK_RUNNING]} "
+                        f"失败={status_count[TASK_FAILED]} 成功={status_count[TASK_SUCCEEDED]}\n"
+                        f"重置后状态: 待触发={new_status_count[TASK_PENDING]} 运行中={new_status_count[TASK_RUNNING]} "
+                        f"失败={new_status_count[TASK_FAILED]} 成功={new_status_count[TASK_SUCCEEDED]}"
+                    )
                 
                 # 获取当前时间的小时和分钟
                 current_hour = now.hour
@@ -252,13 +316,18 @@ class ZaskManager(Star):
                     
                     task_hour, task_minute = parsed_time
                     
-                    # 核心修复：只有当小时和分钟完全匹配时才执行
+                    # 只有当小时和分钟完全匹配时才执行
                     if current_hour != task_hour or current_minute != task_minute:
                         continue
                     
                     # 获取任务锁
                     if task_id not in self.task_locks:
                         self.task_locks[task_id] = asyncio.Lock()
+                    else:
+                        # 清理无效的锁对象
+                        if self.task_locks[task_id].locked() and task["status"] != TASK_RUNNING:
+                            logger.warning(f"任务 {task_id} 的锁处于占用状态但任务未运行，创建新锁")
+                            self.task_locks[task_id] = asyncio.Lock()
                         
                     # 尝试执行任务
                     if not self.task_locks[task_id].locked():
@@ -274,7 +343,7 @@ class ZaskManager(Star):
                 logger.error(f"定时检查器错误: {str(e)}")
                 await asyncio.sleep(10)
     
-    def _parse_task_time(self, time_str: str) -> Optional[tuple]:
+    def _parse_task_time(self, time_str: str) -> Optional[Tuple[int, int]]:
         """解析任务时间字符串为(小时, 分钟)元组"""
         try:
             # 处理冒号格式 (HH:MM)
@@ -306,13 +375,16 @@ class ZaskManager(Star):
         # 格式无效
         return None
 
-    # ... 其余代码保持不变，从 _task_monitor 开始往下 ...
     async def _task_monitor(self) -> None:
         """任务状态监控器（每6小时检查一次）"""
         logger.info("任务状态监控器启动")
         while True:
             try:
                 await asyncio.sleep(21600)  # 6小时
+                
+                # 每日任务状态校验
+                self._validate_task_states()
+                
                 now = datetime.now(CHINA_TZ)
                 today_start = datetime(now.year, now.month, now.day, tzinfo=CHINA_TZ)
                 
@@ -570,29 +642,12 @@ class ZaskManager(Star):
             name = name.strip()[:50]
             time_str = time_str.strip()
             
-            # 验证时间格式（HH:MM）
-            normalized_time = None
-            try:
-                # HH:MM 格式
-                if ':' in time_str:
-                    parts = time_str.split(':')
-                    if len(parts) == 2:
-                        hour = int(parts[0])
-                        minute = int(parts[1])
-                        if 0 <= hour < 24 and 0 <= minute < 60:
-                            normalized_time = f"{hour:02d}:{minute:02d}"
-                
-                # HHMM 格式
-                elif len(time_str) == 4 and time_str.isdigit():
-                    hour = int(time_str[:2])
-                    minute = int(time_str[2:])
-                    if 0 <= hour < 24 and 0 <= minute < 60:
-                        normalized_time = f"{hour:02d}:{minute:02d}"
-            except:
-                pass
-            
-            if not normalized_time:
+            # 验证时间格式
+            parsed_time = self._parse_task_time(time_str)
+            if not parsed_time:
                 raise ValueError("时间格式应为 HH:MM（24小时制），例如：14:00")
+            
+            normalized_time = f"{parsed_time[0]:02d}:{parsed_time[1]:02d}"
             
             # 获取当前会话的唯一标识
             unified_msg_origin = event.unified_msg_origin
@@ -715,14 +770,18 @@ class ZaskManager(Star):
                 yield event.plain_result("当前会话没有定时任务")
                 return
                 
+            # 获取当前日期
+            today = date.today()
+                
             task_list = [
                 "📅 当前会话定时任务列表",
                 f"会话标识：{current_unified}",
+                f"当前日期：{today.strftime('%Y-%m-%d')}",
                 "━━━━━━━━━━━━━━━━"
             ]
             
             for idx, task in enumerate(current_tasks, 1):
-                status = self._get_status_text(task)
+                status = self._get_status_text(task, today)
                 
                 task_list.append(f"▪️ 任务 {idx}")
                 task_list.append(f"名称：{task['script_name']}")
@@ -736,8 +795,8 @@ class ZaskManager(Star):
         except Exception as e:
             raise RuntimeError(f"列出任务失败: {str(e)}")
     
-    def _get_status_text(self, task: Dict) -> str:
-        """获取任务状态的文本描述"""
+    def _get_status_text(self, task: Dict, today: date) -> str:
+        """获取任务状态的文本描述（考虑当前日期）"""
         if task["status"] == TASK_RUNNING:
             if task["task_id"] in self.running_tasks:
                 now = datetime.now(CHINA_TZ)
@@ -748,6 +807,9 @@ class ZaskManager(Star):
         elif task["status"] == TASK_SUCCEEDED:
             last_run = safe_datetime(task.get("last_run"))
             if last_run:
+                # 检查最后执行日期是否今天
+                if last_run.date() == today:
+                    return f"✅ 已成功 (于 {last_run.strftime('%H:%M')})"
                 return f"✅ 已成功 (于 {last_run.strftime('%m/%d %H:%M')})"
             return "✅ 已成功"
         elif task["status"] == TASK_FAILED:
@@ -772,7 +834,7 @@ class ZaskManager(Star):
                 status_info = []
                 status_info.append(f"📊 任务详细状态: {task['task_id']}")
                 status_info.append(f"脚本名称: {task['script_name']}")
-                status_info.append(f"状态: {self._get_status_text(task)}")
+                status_info.append(f"状态: {self._get_status_text(task, date.today())}")
                 status_info.append(f"执行时间: 每日 {task['time']}")
                 
                 last_attempt = safe_datetime(task.get("last_attempt"))
@@ -784,6 +846,7 @@ class ZaskManager(Star):
                     status_info.append(f"最后成功执行: {last_run.strftime('%Y-%m-%d %H:%M')}")
                     
                 status_info.append(f"重试次数: {task['retry_count']}")
+                status_info.append(f"创建时间: {task['created'].strftime('%Y-%m-%d %H:%M') if task.get('created') else '未知'}")
                 
                 if task["task_id"] in self.running_tasks:
                     start_time = self.running_tasks[task["task_id"]]
@@ -801,13 +864,14 @@ class ZaskManager(Star):
                     
                 status_list = ["📊 当前会话任务状态概览"]
                 status_list.append(f"会话标识: {current_unified}")
+                status_list.append(f"当前日期: {date.today().strftime('%Y-%m-%d')}")
                 status_list.append("ID (前8位) | 脚本名称 | 状态")
                 status_list.append("━━━━━━━━━━━━━━━━━━━━━━")
                 
                 for task in tasks:
                     short_id = task["task_id"][-8:]  # 显示后8位ID
                     script_short = task["script_name"][:10] + ("..." if len(task["script_name"]) > 10 else "")
-                    status = self._get_status_text(task)[:15]  # 截短状态描述
+                    status = self._get_status_text(task, date.today())[:15]  # 截短状态描述
                     
                     status_list.append(f"{short_id} | {script_short} | {status}")
                 
@@ -820,6 +884,7 @@ class ZaskManager(Star):
                 
                 status_list.append(f"▶️ 运行中: {running_count} | ⏳ 待触发: {pending_count}")
                 status_list.append(f"✅ 成功: {success_count} | ❌ 失败: {failed_count}")
+                status_list.append(f"已执行: {len(self.today_tasks_executed)}个任务")
                 status_list.append("使用 `/定时 状态 [任务ID]` 查看详细状态")
                 
                 yield event.plain_result("\n".join(status_list))
@@ -829,7 +894,7 @@ class ZaskManager(Star):
     async def _show_help(self, event: AstrMessageEvent) -> MessageEventResult:
         """显示帮助信息"""
         help_msg = """
-📘 定时任务插件使用指南 V5.0.4
+📘 定时任务插件使用指南 V5.0.5
 
 【命令列表】
 /定时 添加 [脚本名] [时间] - 创建每日定时任务
@@ -840,10 +905,12 @@ class ZaskManager(Star):
 /执行 [脚本名] - 立即执行脚本并返回结果
 
 【新特性】
-✓ 支持多日任务自动重置
-✓ 增强日期变更检测机制
-✓ 执行记录持久化存储
-✓ 修复提前执行的定时问题
+✓ 日期变更自动重置任务状态
+✓ 任务状态多重校验机制
+✓ 详细的状态报告和日志
+✓ 状态信息包含执行日期
+✓ 修复日期重置问题
+✓ 优化时间格式解析
 
 【示例】
 /定时 添加 数据备份 08:30
@@ -856,12 +923,16 @@ class ZaskManager(Star):
 - 仅当前会话的任务可管理
 - 每日0点自动重置所有任务状态
 - 任务精确到分钟执行
+- 状态校验确保数据一致性
         """.strip()
         yield event.plain_result(help_msg)
 
     async def terminate(self) -> None:
         """插件卸载时停止所有任务"""
         logger.info("插件终止中...")
+        
+        # 终止前状态校验
+        self._validate_task_states()
         
         # 取消检查器任务
         if hasattr(self, "schedule_checker_task"):
