@@ -1,5 +1,5 @@
 name: ZaskManager # 这是你的插件的唯一识别名。
 desc: 这是 AstrBot 的定时发送插件，也可以直接指令执行。 # 插件简短描述
-version: v5.0.4 # 插件版本号。
+version: v5.0.5 # 插件版本号。
 author: xiaoxin # 作者
 repo: https://github.com/styy88/ZaskManager # 插件的仓库地址
